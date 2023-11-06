@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "active-light"
+version = "0.1.0"
+description = "Comprehensive active machine learning library for knowledge acquisition."
+authors = ["Daniel Kaluza <daniel.kaluza.dk@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "al" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11"
+torch = ">=2.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+black = "^23.10.1"
+isort = "^5.12.0"
+pylint = "^3.0.2"
+poethepoet = "^0.24.2"
+pytest-cov = "^4.1.0"
+
+
+[tool.poetry.group.plot.dependencies]
+mpltern = "^1.0.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.poe.tasks]
+test = "pytest --cov=al"

@@ -1,0 +1,6 @@
+.conda
+.coverage
+.vscode
+poetry.lock
+**/__pycache__
+.pytest_cache
