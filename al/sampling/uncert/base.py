@@ -1,6 +1,15 @@
+"""All uncertainty functions expect classes to be passed as the last dimension in probas"""
 import abc
 
 import torch
+
+CLASSES_DIM = -1
+
+
+def select_by_classes_dim(tensor: torch.Tensor, slice_to_select: slice | int):
+    indexing = [slice(None, None) for _ in tensor.shape]
+    indexing[CLASSES_DIM] = slice_to_select
+    return tensor[*indexing]
 
 
 class UncertBase(abc.ABC):
@@ -16,7 +25,7 @@ class UncertBase(abc.ABC):
         return self._call(probas)
 
     def _validate_probas(self, probas: torch.FloatTensor):
-        if len(probas) and probas.shape[1] < 2:
+        if len(probas) and probas.shape[CLASSES_DIM] < 2:
             raise ValueError(
                 "Uncertainty functions can only be used in case of distributions with at least 2 values"
             )

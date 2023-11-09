@@ -2,10 +2,28 @@ import pytest
 import torch
 
 from al.sampling.uncert import confidence_ratio, entropy, least_confidence, margin
-from al.sampling.uncert.evidence import _compute_proba_layers
+from al.sampling.uncert.evidence import (
+    _compute_proba_layers,
+    height_ratio_exponent_evidence,
+    height_ratio_large_exponent_evidence,
+    height_ratio_log_plus_evidence,
+    pyramidal_exponent_evidence,
+    pyramidal_large_exponent_evidence,
+    pyramidal_log_plus_evidence,
+)
+
+CLASSICAL_UNCERT_MEASURES = [entropy, least_confidence, margin, confidence_ratio]
+EVIDENCE_BASED_UNCERT_MEASURES = [
+    pyramidal_exponent_evidence,
+    pyramidal_large_exponent_evidence,
+    pyramidal_log_plus_evidence,
+    height_ratio_exponent_evidence,
+    height_ratio_large_exponent_evidence,
+    height_ratio_log_plus_evidence,
+]
 
 
-@pytest.fixture(params=[entropy, least_confidence, margin, confidence_ratio])
+@pytest.fixture(params=CLASSICAL_UNCERT_MEASURES + EVIDENCE_BASED_UNCERT_MEASURES)
 def uncert_func(request: pytest.FixtureRequest):
     return request.param
 
@@ -60,6 +78,10 @@ def test_uncert_raises_on_wrong_input_shape(uncert_func, probas):
             torch.tensor([[0.5, 0.5, 0], [0.3, 0.2, 0.5]], dtype=torch.float),
             torch.tensor([[0, 0.5, 0], [0.2, 0.1, 0.2]], dtype=torch.float),
         ),
+        (
+            torch.tensor([[0.4, 0.2, 0.15, 0.15, 0.1], [0.15, 0.1, 0.15, 0.2, 0.4]]),
+            torch.tensor([[0.1, 0.05, 0.05, 0.2], [0.1, 0.05, 0.05, 0.2]]),
+        ),
     ],
 )
 def test_compute_proba_layers_pads_values(probas, expected_values):
@@ -95,3 +117,33 @@ def test_compute_proba_layers_pads_values(probas, expected_values):
 def test_compute_proba_layers_pads_values(probas, expected_layers):
     proba_layers = _compute_proba_layers(probas)
     assert torch.all(proba_layers.layers == expected_layers)
+
+
+TEST_TENSOR = torch.tensor([[0.4, 0.2, 0.15, 0.15, 0.1], [0.15, 0.1, 0.15, 0.2, 0.4]])
+PYRAMIDAL_EXPECTED_VALUE = 1 - (0.2 + 0.1 / 2 + 0.2 / 8 + 0.5 / 16)
+HEIGHT_RATIO_EXPECTED_VALUE = 1 - (0.5 + 0.125 / 2 + 0.125 / 8 + 0.25 / 16)
+
+
+@pytest.mark.parametrize(
+    "uncert_func, expected_value",
+    [
+        (pyramidal_exponent_evidence, PYRAMIDAL_EXPECTED_VALUE),
+        (height_ratio_exponent_evidence, HEIGHT_RATIO_EXPECTED_VALUE),
+    ],
+)
+def test_exponent_evidence_values(uncert_func, expected_value):
+    probas = TEST_TENSOR
+    assert torch.all(uncert_func(probas) == expected_value)
+
+
+@pytest.mark.parametrize(
+    "uncert_func, expected_value",
+    [
+        (pyramidal_exponent_evidence, PYRAMIDAL_EXPECTED_VALUE),
+        (height_ratio_exponent_evidence, HEIGHT_RATIO_EXPECTED_VALUE),
+    ],
+)
+def test_exponent_evidence_for_multi_dim(uncert_func, expected_value):
+    probas = TEST_TENSOR.unsqueeze(1)
+    probas = probas.expand(-1, 7, -1)
+    assert torch.all(uncert_func(probas) == expected_value)

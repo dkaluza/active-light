@@ -1,1 +1,1 @@
-from .ternary import plot_uncertainty_function
+from .ternary import plot_uncertainty_function, plot_uncertainty_function_with_gradients

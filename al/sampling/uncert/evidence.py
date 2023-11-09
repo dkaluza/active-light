@@ -1,18 +1,20 @@
-from typing import NamedTuple, Sequence
+import functools
+from typing import Callable, NamedTuple, Sequence
 
 import torch
 
-from .base import UncertBase
+from .base import CLASSES_DIM, UncertBase
 
 
 class ProbaLayers(NamedTuple):
     probas: torch.FloatTensor
     """ 
-    Tensor of shape `(n_samples, n_layers)` containing unique proba levels, padded with 0s at the end.
+    Tensor of shape `(n_samples, ..., n_layers)` containing unique proba levels, padded with 0s at the end.
     """
     layers: torch.BoolTensor
-    """ Tensor of shape `(n_samples, n_layers, n_classes)`.
-    Value [i, j, k] denotes whether for sample i, k-th class belongs to layered set j.
+    """ Tensor of shape `(n_samples,  ..., n_layers, n_classes)`.
+    In case of no additional dimensions
+    balue [i, j, k] denotes whether for sample i, k-th class belongs to layered set j.
     """
 
 
@@ -29,7 +31,7 @@ def _compute_proba_layers(probas: torch.FloatTensor) -> ProbaLayers:
     Parameters
     ----------
     probas : torch.FloatTensor
-        Probability distribution for which layered sets should be computed/
+        Probability distribution for which layered sets should be computed
 
     Returns
     -------
@@ -37,28 +39,107 @@ def _compute_proba_layers(probas: torch.FloatTensor) -> ProbaLayers:
          - probas - probability differences corresponding to the layered sets
          - layers - indicators of classes belonging to layered sets
     """
-    n_samples, n_classes = probas.shape
-    unique_probas = torch.nn.utils.rnn.pad_sequence(
-        [sample.unique() for sample in probas], batch_first=True
-    )
-    n_layers = unique_probas.shape[1]
+    n_samples, n_classes = probas.shape[0], probas.shape[CLASSES_DIM]
+    original_shape = probas.shape
 
-    returned_probas = torch.zeros_like(unique_probas)
-    layers = torch.zeros((n_samples, n_layers, n_classes), dtype=torch.bool)
-    previous_proba = 0
-    for i in range(n_layers):
-        considered_proba = unique_probas[:, i]
-        proba_difference = considered_proba - previous_proba
-        returned_probas[:, i] = torch.where(
-            proba_difference > 0, proba_difference, torch.zeros_like(proba_difference)
+    # unique is not differentiable therefore in case of gradient requirement
+    # we have to just stick to sorting, which will result in more zeros in output mass assignments
+    # although it is more vectorized therefore it might still lead to better performance in
+    # some cases
+    if not probas.requires_grad:
+        # in case of more dimensions than 2 add dimensions to samples before unique and then restore appropriate shape
+        # heave assumption on CLASSES_DIM == -1
+        unique_probas = torch.nn.utils.rnn.pad_sequence(
+            [sample.unique() for sample in probas.reshape(-1, n_classes)],
+            batch_first=True,
         )
+        unique_probas = unique_probas.reshape(*original_shape[:-1], -1)
+    else:
+        unique_probas = probas.sort(dim=-1).values
 
-        layers[:, i] = probas >= considered_proba.unsqueeze(dim=1)
-        previous_proba = considered_proba
+    zeros_to_prepend_to_difference = torch.zeros((*unique_probas.shape[:-1], 1))
+    proba_difference = torch.diff(
+        unique_probas, dim=CLASSES_DIM, prepend=zeros_to_prepend_to_difference
+    )
+    returned_probas = torch.where(
+        proba_difference > 0, proba_difference, torch.zeros_like(proba_difference)
+    )
+
+    # we add dim 1, i.e. layers dimension to probas, and classes dimension to unique_probas
+    layers = probas.unsqueeze(-2) >= unique_probas.unsqueeze(CLASSES_DIM)
 
     return ProbaLayers(probas=returned_probas, layers=layers)
 
 
 class PyramidalEvidence(UncertBase):
+    def __init__(
+        self,
+        aggregation_function: Callable[
+            [torch.FloatTensor, torch.BoolTensor], torch.FloatTensor
+        ],
+    ) -> None:
+        super().__init__()
+        self.aggregation_function = aggregation_function
+
     def _call(self, probas: torch.FloatTensor) -> torch.FloatTensor:
-        return super()._call(probas)
+        proba_layers = _compute_proba_layers(probas)
+        layer_sizes = proba_layers.layers.sum(dim=CLASSES_DIM)
+        return self.aggregation_function(
+            proba_layers.probas * layer_sizes, proba_layers.layers
+        )
+
+
+class HeightRatioEvidence(UncertBase):
+    def __init__(
+        self,
+        aggregation_function: Callable[
+            [torch.FloatTensor, torch.BoolTensor], torch.FloatTensor
+        ],
+    ) -> None:
+        super().__init__()
+        self.aggregation_function = aggregation_function
+
+    def _call(self, probas: torch.FloatTensor) -> torch.FloatTensor:
+        proba_layers = _compute_proba_layers(probas)
+
+        return self.aggregation_function(
+            proba_layers.probas / probas.max(dim=CLASSES_DIM, keepdim=True).values,
+            proba_layers.layers,
+        )
+
+
+def exponent_evidence_aggregation(
+    proba_masses: torch.FloatTensor, layers: torch.BoolTensor, exponent_base: int = 2
+) -> torch.FloatTensor:
+    layered_set_size = layers.sum(dim=CLASSES_DIM)
+    exponent_base = torch.full_like(
+        layered_set_size, fill_value=exponent_base, dtype=torch.float
+    )
+    return 1 - torch.sum(
+        proba_masses * exponent_base ** (-layered_set_size + 1), dim=CLASSES_DIM
+    )
+
+
+def log_plus_evidence_aggregation(
+    proba_masses: torch.FloatTensor, layers: torch.BoolTensor
+) -> torch.FloatTensor:
+    layered_set_size = layers.sum(dim=CLASSES_DIM)
+    # we substract one to get 0 value for pure probability
+    # as in othe uncertainty functions
+    return (
+        torch.sum(proba_masses * torch.log2(layered_set_size + 1), dim=CLASSES_DIM) - 1
+    )
+
+
+pyramidal_exponent_evidence = PyramidalEvidence(exponent_evidence_aggregation)
+pyramidal_large_exponent_evidence = PyramidalEvidence(
+    functools.partial(exponent_evidence_aggregation, exponent_base=4)
+)
+pyramidal_log_plus_evidence = PyramidalEvidence(log_plus_evidence_aggregation)
+
+
+height_ratio_exponent_evidence = HeightRatioEvidence(exponent_evidence_aggregation)
+height_ratio_large_exponent_evidence = HeightRatioEvidence(
+    functools.partial(exponent_evidence_aggregation, exponent_base=4)
+)
+height_ratio_log_plus_evidence = HeightRatioEvidence(log_plus_evidence_aggregation)
