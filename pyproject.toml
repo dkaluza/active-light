@@ -22,7 +22,15 @@ ipykernel = "^6.26.0"
 
 
 [tool.poetry.group.plot.dependencies]
-mpltern = "^1.0.2"
+mpltern = ">=1.0.2"
+matplotlib = ">=3.8.1"
+
+
+[tool.poetry.group.loops.dependencies]
+tqdm = "^4.66.1"
+torcheval = "^0.0.7"
+pydantic = "^2.4.2"
+
 
 [build-system]
 requires = ["poetry-core"]
