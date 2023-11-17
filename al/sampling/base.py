@@ -11,10 +11,10 @@ class InformativenessProto(Protocol):
         self,
         probas: torch.Tensor = None,
         model: ModelProto | None = None,
-        pool: Dataset | None = None,
+        dataset: Dataset | None = None,
     ) -> torch.FloatTensor:
         ...
 
     @property
     def __name__(self) -> str:
-        ...
+        return self.__class__.__name__

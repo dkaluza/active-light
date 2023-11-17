@@ -1,7 +1,11 @@
 import pytest
 import torch
+from torch.utils.data import TensorDataset
+from xgboost import XGBRFClassifier
 
+from al.loops.experiments import XGBWrapper
 from al.sampling.uncert import confidence_ratio, entropy, least_confidence, margin
+from al.sampling.uncert.base import UncertBase
 from al.sampling.uncert.evidence import (
     _compute_proba_layers,
     height_ratio_exponent_evidence,
@@ -24,7 +28,7 @@ EVIDENCE_BASED_UNCERT_MEASURES = [
 
 
 @pytest.fixture(params=CLASSICAL_UNCERT_MEASURES + EVIDENCE_BASED_UNCERT_MEASURES)
-def uncert_func(request: pytest.FixtureRequest):
+def uncert_func(request: pytest.FixtureRequest) -> UncertBase:
     return request.param
 
 
@@ -147,3 +151,33 @@ def test_exponent_evidence_for_multi_dim(uncert_func, expected_value):
     probas = TEST_TENSOR.unsqueeze(1)
     probas = probas.expand(-1, 7, -1)
     assert torch.all(uncert_func(probas) == expected_value)
+
+
+@pytest.mark.parametrize(
+    "probas",
+    [
+        torch.eye(2, dtype=torch.float),
+        torch.tensor([[0, 0, 1], [1, 0, 0]], dtype=torch.float),
+    ],
+)
+def test_uncert_pure_distribution_returns_zero(uncert_func, probas):
+    uncert_values = uncert_func(probas)
+
+    assert torch.allclose(uncert_values, torch.zeros_like(uncert_values))
+
+
+@pytest.mark.parametrize(
+    "dataset, expected_shape",
+    [
+        (TensorDataset(torch.rand(2, 7), torch.tensor([0, 1])), 2),
+        (TensorDataset(torch.rand(0, 2), torch.tensor([])), 0),
+        (TensorDataset(torch.rand(3, 2), torch.tensor([0, 1, 2])), 3),
+    ],
+)
+def test_uncert_with_model_returns_n_samples_shape(
+    uncert_func, dataset, expected_shape
+):
+    model = XGBWrapper(XGBRFClassifier(n_jobs=1))
+    model.fit(dataset)
+    uncert_values: torch.FloatTensor = uncert_func(model=model, dataset=dataset)
+    assert uncert_values.shape == (expected_shape,)

@@ -25,13 +25,14 @@ class UncertBase(InformativenessProto, abc.ABC):
         self,
         probas: torch.Tensor = None,
         model: ModelProto | None = None,
-        pool: Dataset | None = None,
+        dataset: Dataset | None = None,
     ) -> torch.FloatTensor:
         if probas is None:
             assert (
-                model is not None and pool is not None
-            ), "In case of no probas passed model and pool have to be defined."
-            probas = model.predict_proba(pool)
+                model is not None and dataset is not None
+            ), "In case of no probas passed model and dataset have to be defined."
+            probas = model.predict_proba(dataset)
+
         if not len(probas):
             return torch.empty(0)
         self._validate_probas(probas)
@@ -43,7 +44,3 @@ class UncertBase(InformativenessProto, abc.ABC):
             raise ValueError(
                 "Uncertainty functions can only be used in case of distributions with at least 2 values."
             )
-
-    @property
-    def __name__(self):
-        return self.__class__.__name__

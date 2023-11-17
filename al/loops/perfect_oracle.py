@@ -2,7 +2,7 @@ from typing import Callable, Sequence
 
 import torch
 from torch.utils.data import ConcatDataset, Dataset, Subset
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from al.base import ModelProto
 from al.loops.base import ALDataset, LoopConfig, LoopMetric, LoopResults
@@ -10,16 +10,15 @@ from al.sampling.base import InformativenessProto
 
 
 def active_learning_loop(
-    initial_train: Dataset,
-    pool: Dataset,
-    test: Dataset,
+    initial_train: ALDataset,
+    pool: ALDataset,
+    test: ALDataset,
     info_func: InformativenessProto,
     budget: float | int,
     model: ModelProto,
     config: LoopConfig,
 ) -> LoopResults:
     results = LoopResults()
-    test = ALDataset(test)
     used_budget = 0
 
     if config.n_classes is None:
@@ -36,17 +35,18 @@ def active_learning_loop(
         )
         add_pool_probas(results=results, model=model, pool=pool, config=config)
 
-    with tqdm(total=budget) as progress_bar:
+    with tqdm(total=budget, leave=None) as progress_bar:
         while used_budget < budget:
             batch_size = min(config.batch_size, budget - used_budget)
-            info_values = info_func(model=model, pool=pool)
+            info_values = info_func(model=model, dataset=pool)
             selected_samples_idx = torch.topk(info_values, k=batch_size, dim=0).indices
+            selected_samples_idx = selected_samples_idx.reshape(-1)
 
-            train = ConcatDataset([train, Subset(pool, selected_samples_idx)])
+            train = ALDataset(
+                ConcatDataset([train, Subset(pool, selected_samples_idx)])
+            )
 
-            remaining_idx = torch.arange(len(pool), dtype=torch.long)
-            remaining_idx = remaining_idx[~selected_samples_idx]
-            pool = Subset(pool, remaining_idx)
+            pool = ALDataset(remove_indices_from_dataset(pool, selected_samples_idx))
 
             model.fit(train=train)
             with torch.no_grad():
@@ -59,6 +59,21 @@ def active_learning_loop(
             progress_bar.update(batch_size)
 
     return results
+
+
+def remove_indices_from_dataset(dataset: Dataset, indices: list[int]) -> Dataset:
+    remaining_idx = torch.arange(len(dataset), dtype=torch.long)
+    # TODO: test for larger batches that really multiple indices are taken
+    # TODO: test that appropriate indexes are taken,
+    # and missmatch after subset selection does not occur
+    remaining_idx_mask = torch.full_like(
+        remaining_idx, fill_value=True, dtype=torch.bool
+    )
+
+    remaining_idx_mask[indices] = False
+    remaining_idx = remaining_idx[remaining_idx_mask]
+
+    return Subset(dataset, remaining_idx)
 
 
 def add_next_metrics_evaluation(
@@ -74,7 +89,7 @@ def add_next_metrics_evaluation(
         metric_fun.update(probas, test.targets)
         score = metric_fun.compute()
 
-        results.metrics.setdefault(metric, []).append(score)
+        results.metrics.setdefault(metric.name, []).append(score)
 
 
 def add_pool_probas(

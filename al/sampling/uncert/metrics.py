@@ -45,8 +45,12 @@ def numerical_gradient(
         & (distribution - gradient_step >= 0).bool()
     ).all(dim=CLASSES_DIM)
 
+    # dist shape (n_samples, ..., n_classes)
     distribution = distribution.unsqueeze(1)
+    # dist shape (n_samples, 1, ..., n_classes)
     uncert_values = func(distribution)
+    # uncert_values shape  (n_samples, 1, ...)
+    # the additional 1 size is needed to make difeerence quotient over all directions
 
     distribution = distribution[well_defined_positions]
     uncert_values = uncert_values[well_defined_positions]
@@ -61,8 +65,34 @@ def _difference_quotient(
     distribution: torch.Tensor,
     func_values_for_dist: torch.Tensor,
     d_: torch.Tensor,
-):
-    return (func(distribution + d_) - func_values_for_dist) / (d_**2).sum() ** (0.5)
+) -> torch.FloatTensor:
+    """Difference quotient before functiion values and function applied to
+    ditribution moved by a small step.
+
+    Parameters
+    ----------
+    func : Callable[[torch.FloatTensor], torch.FloatTensor]
+        Function to apply to moved distribution.
+    distribution : torch.Tensor
+        Distribution to move, it should be of shape `(n_samples, 1, ..., n_classes)`.
+    func_values_for_dist : torch.Tensor
+        Precomputed values of function fo the distribution with shape `(n_samples, 1, ...)`
+    d_ : torch.Tensor
+        Small step directions in which distribution should be moved before applying the
+        function. Usually they should have shape `(1, n_directions, ..., n_classes)`, although they can be also
+        of shape `(n_samples, n_directions, ..., n_classes)` to have different directions applied for each sample.
+
+    Returns
+    -------
+    torch.FloatTensor
+        Difference quotient values obtained in each direction.
+        The shape of the tensor will be `(n_samples, n_directions, ...)`
+    """
+    if distribution.shape[0] == 0:
+        return torch.empty_like(func_values_for_dist)
+    return (func(distribution + d_) - func_values_for_dist) / torch.linalg.vector_norm(
+        d_, dim=CLASSES_DIM
+    )
 
 
 # gradients cannot be well computed for distributions near simplex border, therefore
@@ -95,6 +125,26 @@ def simplex_vertex_repel_ratio(func, distribution):
     vertex_position = _get_nearest_vertex_position(distribution)
 
     return cosine_similarity(-gradient, vertex_position - distribution, dim=CLASSES_DIM)
+
+
+def monotonicity_from_vertex(func, distribution, derivative_step: float = 1e-4):
+    vertex_position = _get_nearest_vertex_position(distribution)
+    func_values_for_dist = func(distribution)
+    direction_to_nearest_vertex = vertex_position - distribution
+    direction_to_nearest_vertex = (
+        direction_to_nearest_vertex
+        / torch.linalg.vector_norm(
+            direction_to_nearest_vertex, dim=CLASSES_DIM, keepdim=True
+        )
+    )
+    derivative_approx = _difference_quotient(
+        func=func,
+        distribution=distribution,
+        func_values_for_dist=func_values_for_dist,
+        d_=direction_to_nearest_vertex * derivative_step,
+    )  # approximation of change of func when we are getting nearer the vertex
+
+    return -derivative_approx
 
 
 def _get_nearest_vertex_position(distribution: torch.FloatTensor) -> torch.FloatTensor:

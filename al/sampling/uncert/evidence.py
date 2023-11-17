@@ -77,9 +77,12 @@ class PyramidalEvidence(UncertBase):
         aggregation_function: Callable[
             [torch.FloatTensor, torch.BoolTensor], torch.FloatTensor
         ],
+        *,
+        name: str
     ) -> None:
         super().__init__()
         self.aggregation_function = aggregation_function
+        self._name = name
 
     def _call(self, probas: torch.FloatTensor) -> torch.FloatTensor:
         proba_layers = _compute_proba_layers(probas)
@@ -88,6 +91,10 @@ class PyramidalEvidence(UncertBase):
             proba_layers.probas * layer_sizes, proba_layers.layers
         )
 
+    @property
+    def __name__(self):
+        return self._name
+
 
 class HeightRatioEvidence(UncertBase):
     def __init__(
@@ -95,9 +102,12 @@ class HeightRatioEvidence(UncertBase):
         aggregation_function: Callable[
             [torch.FloatTensor, torch.BoolTensor], torch.FloatTensor
         ],
+        *,
+        name: str
     ) -> None:
         super().__init__()
         self.aggregation_function = aggregation_function
+        self._name = name
 
     def _call(self, probas: torch.FloatTensor) -> torch.FloatTensor:
         proba_layers = _compute_proba_layers(probas)
@@ -106,6 +116,10 @@ class HeightRatioEvidence(UncertBase):
             proba_layers.probas / probas.max(dim=CLASSES_DIM, keepdim=True).values,
             proba_layers.layers,
         )
+
+    @property
+    def __name__(self):
+        return self._name
 
 
 def exponent_evidence_aggregation(
@@ -131,15 +145,28 @@ def log_plus_evidence_aggregation(
     )
 
 
-pyramidal_exponent_evidence = PyramidalEvidence(exponent_evidence_aggregation)
+pyramidal_exponent_evidence = PyramidalEvidence(
+    exponent_evidence_aggregation, name="pyramidal_exponent_evidence"
+)
+
 pyramidal_large_exponent_evidence = PyramidalEvidence(
-    functools.partial(exponent_evidence_aggregation, exponent_base=4)
+    functools.partial(exponent_evidence_aggregation, exponent_base=4),
+    name="pyramidal_large_exponent_evidence",
 )
-pyramidal_log_plus_evidence = PyramidalEvidence(log_plus_evidence_aggregation)
 
+pyramidal_log_plus_evidence = PyramidalEvidence(
+    log_plus_evidence_aggregation, name="pyramidal_log_plus_evidence"
+)
 
-height_ratio_exponent_evidence = HeightRatioEvidence(exponent_evidence_aggregation)
+height_ratio_exponent_evidence = HeightRatioEvidence(
+    exponent_evidence_aggregation, name="height_ratio_exponent_evidence"
+)
+
 height_ratio_large_exponent_evidence = HeightRatioEvidence(
-    functools.partial(exponent_evidence_aggregation, exponent_base=4)
+    functools.partial(exponent_evidence_aggregation, exponent_base=4),
+    name="height_ratio_large_exponent_evidence",
 )
-height_ratio_log_plus_evidence = HeightRatioEvidence(log_plus_evidence_aggregation)
+
+height_ratio_log_plus_evidence = HeightRatioEvidence(
+    log_plus_evidence_aggregation, name="height_ratio_log_plus_evidence"
+)
