@@ -17,7 +17,8 @@ class Random(InformativenessProto):
         n_samples = (
             probas.shape[:-1] if probas is not None else len(dataset)
         )  # TODO what about datasets with none singleton shape?
-        return torch.rand(n_samples)
+        requires_grad = probas.requires_grad if probas is not None else False
+        return torch.rand(n_samples, requires_grad=requires_grad)
 
 
 random = Random()

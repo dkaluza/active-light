@@ -101,10 +101,16 @@ def torch_gradient(
     func: Callable[[torch.FloatTensor], torch.FloatTensor],
     distribution: torch.FloatTensor,
 ) -> tuple[torch.FloatTensor, torch.FloatTensor]:
-    distribution_with_grad = distribution.clone().detach().requires_grad_(True)
+    distribution_with_grad = distribution.clone().detach_().requires_grad_(True)
     uncert_result = func(distribution_with_grad)
-    uncert_result.mean().backward()
-    return distribution, distribution_with_grad.grad
+    uncert_result.sum().backward()
+    grad = distribution_with_grad.grad
+
+    if (
+        grad is None
+    ):  # may occur if uncert is independent from distribution, e.g. random
+        grad = torch.zeros_like(distribution_with_grad)
+    return distribution_with_grad.detach_(), grad
 
 
 def prior_descent_ratio(func, distribution, prior=None):
@@ -115,15 +121,53 @@ def prior_descent_ratio(func, distribution, prior=None):
     # in case of user passed prior is transposed
     prior = prior.reshape(1, n_classes)
 
-    distribution, gradient = numerical_gradient(func, distribution=distribution)
+    distribution, gradient = torch_gradient(func, distribution=distribution)
 
     return cosine_similarity(gradient, prior - distribution, dim=CLASSES_DIM)
 
 
-def simplex_vertex_repel_ratio(func, distribution):
-    distribution, gradient = numerical_gradient(func, distribution=distribution)
-    vertex_position = _get_nearest_vertex_position(distribution)
+def uncert_maximum_descent_ratio(func, distribution):
+    n_classes = distribution.shape[CLASSES_DIM]
 
+    original_shape = distribution.shape
+    distribution = distribution.reshape(-1, n_classes)
+
+    distribution, gradient = torch_gradient(func, distribution=distribution)
+    uncertainty_max_points = torch.zeros(
+        distribution.shape[0], n_classes - 1, n_classes
+    )
+    uncertainty_dist_values = 1 / torch.arange(n_classes, 1, -1)
+    uncertainty_dist_values = (
+        uncertainty_dist_values.unsqueeze(0)
+        .unsqueeze(-1)
+        .expand_as(uncertainty_max_points)
+    )
+    # we take upper triangular part to have probability divided to decreasing number
+    # of classes in every row
+    # the i-th row should have probability divided to n-classes - i
+    uncertainty_dist_values = torch.triu(uncertainty_dist_values)
+
+    # descending sort will match the upper triangular with values
+    order = torch.argsort(distribution, dim=CLASSES_DIM, descending=False)
+
+    uncertainty_max_points.scatter_(
+        dim=-1,
+        index=order.unsqueeze(1).expand_as(uncertainty_max_points),
+        src=uncertainty_dist_values,
+    )
+
+    reuslts = cosine_similarity(
+        gradient.unsqueeze(1),
+        uncertainty_max_points - distribution.unsqueeze(1),
+        dim=CLASSES_DIM,
+    )
+
+    return reuslts.reshape([*original_shape[:-1], n_classes - 1])
+
+
+def simplex_vertex_repel_ratio(func, distribution):
+    distribution, gradient = torch_gradient(func, distribution=distribution)
+    vertex_position = _get_nearest_vertex_position(distribution)
     return cosine_similarity(-gradient, vertex_position - distribution, dim=CLASSES_DIM)
 
 
@@ -149,7 +193,9 @@ def monotonicity_from_vertex(func, distribution, derivative_step: float = 1e-4):
 
 def _get_nearest_vertex_position(distribution: torch.FloatTensor) -> torch.FloatTensor:
     vertex_position = torch.zeros_like(distribution)
-    vertex_position[
-        torch.arange(distribution.shape[0]), torch.argmax(distribution, dim=CLASSES_DIM)
-    ] = 1
+    vertex_position.scatter_(
+        dim=CLASSES_DIM,
+        index=torch.argmax(distribution, dim=CLASSES_DIM, keepdim=True),
+        src=torch.ones_like(vertex_position),
+    )
     return vertex_position

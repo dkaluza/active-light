@@ -63,9 +63,7 @@ def active_learning_loop(
 
 def remove_indices_from_dataset(dataset: Dataset, indices: list[int]) -> Dataset:
     remaining_idx = torch.arange(len(dataset), dtype=torch.long)
-    # TODO: test for larger batches that really multiple indices are taken
-    # TODO: test that appropriate indexes are taken,
-    # and missmatch after subset selection does not occur
+
     remaining_idx_mask = torch.full_like(
         remaining_idx, fill_value=True, dtype=torch.bool
     )

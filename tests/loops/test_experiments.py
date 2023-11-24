@@ -1,5 +1,6 @@
 import pathlib
 import tempfile
+from typing import Callable
 from unittest.mock import Mock
 
 import pytest
@@ -15,11 +16,18 @@ from al.loops.experiments import (
     ExperimentResults,
     NClassesGuaranteeWrapper,
     XGBWrapper,
+    add_uncert_metric_for_probas,
     load_results,
     save_results,
 )
 from al.loops.perfect_oracle import active_learning_loop
 from al.sampling.uncert.classical import entropy
+from al.sampling.uncert.metrics import (
+    monotonicity_from_vertex,
+    prior_descent_ratio,
+    simplex_vertex_repel_ratio,
+    uncert_maximum_descent_ratio,
+)
 
 
 def test_run_experiments_runs_for_selected_number_of_seeds():
@@ -294,3 +302,35 @@ def test_nclassesguranteewrapper_maintains_probas(dataset, n_classes):
     missing_targets[dataset.targets] = False
     assert torch.all(probas[:, dataset.targets] == 1)
     assert torch.all(probas[:, missing_targets] == 0)
+
+
+@pytest.mark.parametrize(
+    "experiment_results",
+    [
+        {
+            entropy.__name__: [
+                EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS,
+                EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS,
+            ]
+        }
+    ],
+)
+@pytest.mark.parametrize(
+    "metric_func",
+    [
+        monotonicity_from_vertex,
+        simplex_vertex_repel_ratio,
+        uncert_maximum_descent_ratio,
+        prior_descent_ratio,
+    ],
+)
+def test_add_uncert_metric_for_probas_adds_metric(
+    experiment_results: ExperimentResults, metric_func: Callable
+):
+    add_uncert_metric_for_probas(
+        experiment_results, uncerts=[entropy], metric=metric_func, name="test"
+    )
+    for _, val in experiment_results.items():
+        for loop_result in val:
+            assert "test" in loop_result.metrics
+            assert len(loop_result.metrics["test"]) == len(loop_result.pool_probas)

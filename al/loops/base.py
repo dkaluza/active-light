@@ -110,7 +110,7 @@ class ALDatasetWithoutTargets(Dataset, metaclass=TransparentWrapperMeta):
         return self.features.__hash__()
 
     def _iterate_over_dataset(self):
-        loader = DataLoader(self.dataset)
+        loader = DataLoader(self.dataset, shuffle=False)
         yield from loader
 
     def __getitem__(self, index):

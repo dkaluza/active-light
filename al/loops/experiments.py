@@ -30,7 +30,10 @@ def run_experiment(
     save_path: str | None = None,
     **loop_kwargs,
 ) -> ExperimentResults:
-    generator = torch.Generator().manual_seed(seed)
+    device = torch.empty(
+        1
+    ).device  # a trick to get default device since appropriate helper does not exist
+    generator = torch.Generator(device=device).manual_seed(seed)
 
     if isinstance(test_frac, float):
         test_frac = int(len(data) * test_frac)
@@ -56,7 +59,6 @@ def run_experiment(
                 )
                 results.setdefault(info.__name__, []).append(loop_result)
                 progress_bar.update(1)
-                # TODO: check size of results?
 
             if save_path is not None:
                 save_results(save_path, results)
@@ -99,7 +101,7 @@ def save_results(path: str, results: ExperimentResults):
 def default_unserialize(code, data):
     if code == TORCH_SERIALIZE_EXTENSION:
         # WARNING: ormsgpack serializes ndarrays as lists...
-        # therefore we are creating tensor with torch.tensor an not from_numpy
+        # therefore we are creating tensor with torch.tensor and not from_numpy
         unpacked_ndarray = msgpack.unpackb(data)
         obj = torch.tensor(
             unpacked_ndarray,
@@ -139,9 +141,9 @@ def create_AL_dataset_from_openml(dataset_id: int) -> CreateALDatasetResult:
             ],
             axis=1,
         )
-    dataset_X, dataset_Y = torch.from_numpy(
+    dataset_X, dataset_Y = torch.tensor(
         dataset_X.to_numpy(dtype=np.float64)
-    ), torch.from_numpy(dataset_Y.cat.codes.to_numpy(dtype=np.int64))
+    ), torch.tensor(dataset_Y.cat.codes.to_numpy(dtype=np.int64))
 
     dataset = ALDataset(TensorDataset(dataset_X, dataset_Y))
     return CreateALDatasetResult(dataset, cat_features, attr_names)
@@ -180,15 +182,25 @@ def add_uncert_metric_for_probas(
     """
     metric_name = name if name is not None else metric.__name__
     uncerts = dict([(uncert.__name__, uncert) for uncert in uncerts])
-    for info_name, loop_results_for_seeds in results.items():
-        uncert = uncerts[info_name]
-        for loop_result in loop_results_for_seeds:
-            assert len(loop_result.pool_probas), "Pool probas shouldn't be empty."
-            metric_values = [
-                metric(func=uncert, distribution=probas).mean()
-                for probas in loop_result.pool_probas
-            ]
-            loop_result.metrics[metric_name] = metric_values
+
+    with tqdm(total=len(uncerts), desc="Uncerts:") as progress_bar:
+        for info_name, loop_results_for_seeds in results.items():
+            uncert = uncerts[info_name]
+
+            # shape of probas (n_samples, n_seeds, n_iters, n_classes)
+            probas = torch.stack(
+                [
+                    torch.nn.utils.rnn.pad_sequence(
+                        loop_result.pool_probas, padding_value=torch.nan
+                    )
+                    for loop_result in loop_results_for_seeds
+                ],
+                dim=1,
+            )
+            metric_values = metric(func=uncert, distribution=probas).nanmean(dim=0)
+            for metric_value, loop_result in zip(metric_values, loop_results_for_seeds):
+                loop_result.metrics[metric_name] = metric_value.tolist()
+            progress_bar.update(1)
 
     return results
 
@@ -202,12 +214,27 @@ class XGBWrapper(ModelProto):
         train = ALDataset(train)
         features = train.features
         targets = train.targets
-        self.model.fit(features.numpy(), targets.numpy())
+        if self.model.device == "cuda":
+            import cupy
+
+            features = cupy.asarray(features)
+            targets = cupy.asarray(targets)
+        else:
+            features = features.numpy(force=True)
+            targets = targets.numpy(force=True)
+        self.model.fit(features, targets)
 
     def predict_proba(self, data: Dataset) -> torch.FloatTensor:
         data = ALDataset(data)
         features = data.features
-        return torch.from_numpy(self.model.predict_proba(features))
+
+        if self.model.device == "cuda":
+            import cupy
+
+            features = cupy.asarray(features)
+        else:
+            features = features.numpy(force=True)
+        return torch.tensor(self.model.predict_proba(features))
 
 
 class NClassesGuaranteeWrapper(ModelProto):
@@ -229,7 +256,7 @@ class NClassesGuaranteeWrapper(ModelProto):
         if train_n_classes != self.n_classes:
             self.targets_encoder = sklearn.preprocessing.LabelEncoder()
             targets = self.targets_encoder.fit_transform(targets)
-            targets = torch.from_numpy(targets)
+            targets = torch.tensor(targets)
             train = TensorDataset(features, targets)
         else:
             self.targets_encoder = None
@@ -241,7 +268,8 @@ class NClassesGuaranteeWrapper(ModelProto):
         predicted_probas = self.model.predict_proba(data)
         if self.targets_encoder is not None:
             probas = torch.zeros((len(data), self.n_classes), dtype=torch.float)
-            probas[:, self.targets_encoder.classes_] = predicted_probas
+            trained_on_classes = torch.tensor(self.targets_encoder.classes_)
+            probas[:, trained_on_classes] = predicted_probas
         else:
             probas = predicted_probas
 
