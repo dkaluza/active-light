@@ -1,4 +1,6 @@
-from typing import Callable, NamedTuple, Sequence, TypeAlias
+from __future__ import annotations
+
+from typing import Any, Callable, NamedTuple, Sequence, TypeAlias
 
 import numpy as np
 import openml
@@ -6,16 +8,198 @@ import ormsgpack as msgpack
 import pandas as pd
 import sklearn
 import torch
+from pydantic import BaseModel
 from torch.utils.data import Dataset, TensorDataset, random_split
 from tqdm.auto import tqdm
 from xgboost import XGBModel
 
 from al.base import ModelProto
-from al.loops.base import ALDataset, LoopResults
+from al.loops.base import ALDataset, FloatTensor, LoopMetricName, LoopResults
 from al.sampling.base import InformativenessProto
 from al.sampling.uncert.base import UncertBase
 
-ExperimentResults: TypeAlias = dict[str, Sequence[LoopResults]]
+EXPERIMENT_RESULTS_SERIALIZE_EXTENSION = 9
+LOOP_RESULTS_SERIALIZE_EXTENSION = 10
+TORCH_SERIALIZE_EXTENSION = 11
+
+
+def default_serizalize(obj: object):
+    if isinstance(obj, torch.Tensor):
+        if obj.shape == tuple():
+            obj = obj.item()
+        else:
+            obj = obj.numpy(force=True)
+        return msgpack.Ext(
+            TORCH_SERIALIZE_EXTENSION,
+            msgpack.packb(obj, option=msgpack.OPT_SERIALIZE_NUMPY),
+        )
+
+    if isinstance(obj, LoopResults):
+        return msgpack.Ext(
+            LOOP_RESULTS_SERIALIZE_EXTENSION,
+            msgpack.packb(dict(obj), default=default_serizalize),
+        )
+    if isinstance(obj, ExperimentResults):
+        return msgpack.Ext(
+            EXPERIMENT_RESULTS_SERIALIZE_EXTENSION,
+            msgpack.packb(
+                obj.model_dump(),
+                default=default_serizalize,
+            ),
+        )
+    raise TypeError(f"{type(obj)} type is not supported in serialization")
+
+
+def default_unserialize(code, data):
+    if code == TORCH_SERIALIZE_EXTENSION:
+        # WARNING: ormsgpack serializes ndarrays as lists...
+        # therefore we are creating tensor with torch.tensor and not from_numpy
+        unpacked_ndarray = msgpack.unpackb(data)
+        obj = torch.tensor(
+            unpacked_ndarray,
+        )
+        return obj
+    if code == LOOP_RESULTS_SERIALIZE_EXTENSION:
+        data_dict = msgpack.unpackb(data, ext_hook=default_unserialize)
+        loop_result = LoopResults.model_validate(data_dict)
+        return loop_result
+    if code == EXPERIMENT_RESULTS_SERIALIZE_EXTENSION:
+        data_dict = msgpack.unpackb(data, ext_hook=default_unserialize)
+        experiment_results = ExperimentResults.model_validate(data_dict)
+        return experiment_results
+
+    raise TypeError(f"Extension type with {code} is not supported")
+
+
+ConfigurationName: TypeAlias = str
+
+
+class ConfigurationResults(BaseModel):
+    metrics: dict[LoopMetricName, FloatTensor]
+    """ 
+    Dict from loop metric name to tensors of shape (n_seeds, n_iterations, ...) 
+    indicating specific metric values across loop iterations in experiments.
+    Common metrics can be found at `al.loops.base.LoopMetric`
+    """
+    pool_probas: None | FloatTensor = None
+    """ Probabilities obtained by model predictions on the samples from the pool. 
+    In case of loops that removes samples during pool iteration the tensors are
+    padded with NaNs at the end(e.g. classical active learning perfect oracles loop).
+    Please keep in mind that due to samples removal and padding the order of samples
+    is not maintained after the iterations. 
+    The shape of probas is (n_seeds, n_iterations, n_samples).
+    """
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, ConfigurationResults):
+            return False
+
+        return (
+            (
+                (self.pool_probas is None and other.pool_probas is None)
+                or (
+                    self.pool_probas is not None
+                    and other.pool_probas is not None
+                    and torch.allclose(
+                        self.pool_probas, other.pool_probas, equal_nan=True
+                    )
+                )
+            )
+            and len(self.metrics) == len(other.metrics)
+            and all(
+                [
+                    (metric_values == other.metrics[metric_name]).all()
+                    for metric_name, metric_values in self.metrics.items()
+                ]
+            )
+        )
+
+
+class ExperimentResults(BaseModel):
+    res: dict[ConfigurationName, ConfigurationResults]
+
+    @staticmethod
+    def from_loop_results(
+        loop_results: dict[str, Sequence[LoopResults]]
+    ) -> ExperimentResults:
+        result = ExperimentResults(res={})
+        for configuration_name, loop_results_for_seeds in loop_results.items():
+            pool_probas = ExperimentResults._retrieve_pool_probas_from_loop_results(
+                loop_results_for_seeds
+            )
+
+            metrics = ExperimentResults._retrieve_metrics_from_loop_results(
+                loop_results_for_seeds
+            )
+            result.res[configuration_name] = ConfigurationResults(
+                pool_probas=pool_probas, metrics=metrics
+            )
+
+        return result
+
+    @staticmethod
+    def _retrieve_pool_probas_from_loop_results(
+        loop_results_for_seeds: Sequence[LoopResults],
+    ):
+        for loop_result in loop_results_for_seeds:
+            if loop_result.pool_probas is None:
+                return None
+
+        if len(loop_results_for_seeds) == 0:
+            return None
+
+        # assumption all of the probas has same n_classes, they differ only in
+        # n_samples, therefore we are padding the missing samples
+        pool_probas = torch.stack(
+            [
+                torch.nn.utils.rnn.pad_sequence(
+                    loop_result.pool_probas,
+                    padding_value=torch.nan,
+                    batch_first=True,
+                )
+                for loop_result in loop_results_for_seeds
+            ],
+            dim=0,
+        )
+
+        return pool_probas
+
+    @staticmethod
+    def _retrieve_metrics_from_loop_results(
+        loop_results_for_seeds: Sequence[LoopResults],
+    ):
+        if len(loop_results_for_seeds) == 0:
+            return {}
+
+        metrics: dict[str, list] = {}
+        for seed_result in loop_results_for_seeds:
+            if seed_result.metrics is not None:
+                for metric_name, metric_values in seed_result.metrics.items():
+                    metrics.setdefault(metric_name, []).append(
+                        torch.tensor(metric_values)
+                    )
+
+        metrics: dict[str, FloatTensor]
+        for metric_name, metric_values in metrics.items():
+            metrics[metric_name] = torch.stack(metric_values)
+
+        return metrics
+
+    def save(self, path: str):
+        with open(path, "wb") as file:
+            buffer = msgpack.packb(
+                self,
+                default=default_serizalize,
+            )
+            file.write(buffer)
+
+    @staticmethod
+    def load(path: str) -> ExperimentResults:
+        with open(path, "rb") as file:
+            buffer = file.read()
+            obj = msgpack.unpackb(buffer, ext_hook=default_unserialize)
+            assert isinstance(obj, ExperimentResults)
+            return obj
 
 
 def run_experiment(
@@ -60,33 +244,11 @@ def run_experiment(
                 results.setdefault(info.__name__, []).append(loop_result)
                 progress_bar.update(1)
 
+            experiment_results = ExperimentResults.from_loop_results(results)
             if save_path is not None:
-                save_results(save_path, results)
+                experiment_results.save(save_path)
 
-    return results
-
-
-LOOP_RESULTS_SERIALIZE_EXTENSION = 10
-TORCH_SERIALIZE_EXTENSION = 11
-
-
-def default_serizalize(obj: object):
-    if isinstance(obj, torch.Tensor):
-        if obj.shape == tuple():
-            obj = obj.item()
-        else:
-            obj = obj.numpy(force=True)
-        return msgpack.Ext(
-            TORCH_SERIALIZE_EXTENSION,
-            msgpack.packb(obj, option=msgpack.OPT_SERIALIZE_NUMPY),
-        )
-    if isinstance(obj, LoopResults):
-        return msgpack.Ext(
-            LOOP_RESULTS_SERIALIZE_EXTENSION,
-            msgpack.packb(dict(obj), default=default_serizalize),
-        )
-
-    raise TypeError(f"{type(obj)} type is not supported in serialization")
+    return experiment_results
 
 
 def save_results(path: str, results: ExperimentResults):
@@ -96,22 +258,6 @@ def save_results(path: str, results: ExperimentResults):
             default=default_serizalize,
         )
         file.write(buffer)
-
-
-def default_unserialize(code, data):
-    if code == TORCH_SERIALIZE_EXTENSION:
-        # WARNING: ormsgpack serializes ndarrays as lists...
-        # therefore we are creating tensor with torch.tensor and not from_numpy
-        unpacked_ndarray = msgpack.unpackb(data)
-        obj = torch.tensor(
-            unpacked_ndarray,
-        )
-        return obj
-    if code == LOOP_RESULTS_SERIALIZE_EXTENSION:
-        data_dict = msgpack.unpackb(data, ext_hook=default_unserialize)
-        loop_result = LoopResults.model_validate(data_dict)
-        return loop_result
-    raise TypeError(f"Extension type with {code} is not supported")
 
 
 def load_results(path: str) -> ExperimentResults:

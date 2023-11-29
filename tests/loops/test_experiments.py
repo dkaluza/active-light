@@ -1,6 +1,6 @@
 import pathlib
 import tempfile
-from typing import Callable
+from typing import Callable, Sequence
 from unittest.mock import Mock
 
 import pytest
@@ -13,6 +13,7 @@ from al.base import ModelProto
 from al.loops import run_experiment
 from al.loops.base import ALDataset, LoopConfig, LoopMetric, LoopResults
 from al.loops.experiments import (
+    ConfigurationResults,
     ExperimentResults,
     NClassesGuaranteeWrapper,
     XGBWrapper,
@@ -32,7 +33,7 @@ from al.sampling.uncert.metrics import (
 
 def test_run_experiments_runs_for_selected_number_of_seeds():
     def naive_loop(*args, **kwargs) -> LoopResults:
-        return LoopResults()
+        return LoopResults(metrics={"TEST": [0.1, 0.2, 0.3]})
 
     def primitive_info1():
         ...
@@ -47,12 +48,13 @@ def test_run_experiments_runs_for_selected_number_of_seeds():
         infos=[primitive_info1, primitive_info2],
         n_repeats=n_repeats,
     )
-    for _, res in results.items():
-        assert len(res) == n_repeats
+    for _, res in results.res.items():
+        assert len(res.metrics["TEST"]) == n_repeats
 
 
 def test_run_experiments_uses_same_datasets_for_different_infos():
     mocked_loop = Mock()
+    mocked_loop.return_value = LoopResults()
 
     def primitive_info1():
         ...
@@ -84,8 +86,9 @@ def _retrieve_datasets_for_info(all_calls_args, info):
     ]
 
 
-def test_run_experiments_uses_generates_different_intial_datasets():
+def test_run_experiments_uses_different_intial_datasets():
     mocked_loop = Mock()
+    mocked_loop.return_value = LoopResults()
 
     def primitive_info1():
         ...
@@ -118,107 +121,249 @@ def test_al_loop_experiment_generates_scores_for_metrics():
         config=LoopConfig(metrics=[LoopMetric.BAC], n_classes=2),
         budget=100,
         model=DumbModel(),
-    )
+    ).res
 
     assert len(results) == 1
 
     entropy_results = results[entropy.__name__]
 
-    for res in entropy_results:
-        assert all([res == 0 for res in res.metrics[LoopMetric.BAC.name]])
+    bac = entropy_results.metrics[LoopMetric.BAC.name]
+    assert bac.shape[0] >= 1
+    assert bac.shape[1] == 101
+    assert torch.allclose(bac, torch.zeros_like(bac))
 
+
+EXAMPLARY_POOL_PROBAS = [torch.eye(3), torch.eye(3), torch.eye(3)]
+EXAMPLARY_POOL_PROBAS_TENSOR = torch.stack(EXAMPLARY_POOL_PROBAS)
+
+EXAMPLARY_METRIC_VALUES = [0.3, 0.3, 0.3]
 
 EXAMPLARY_LOOP_RESULT = LoopResults(
-    metrics={LoopMetric.BAC.name: [0.3, 0.3, 0.3]},
-    pool_probas=[torch.eye(3), torch.eye(3), torch.eye(3)],
+    metrics={LoopMetric.BAC.name: EXAMPLARY_METRIC_VALUES},
+    pool_probas=EXAMPLARY_POOL_PROBAS,
 )
+
 
 EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS = LoopResults(
     metrics={
         LoopMetric.BAC.name: [torch.tensor(0.3), torch.tensor(0.3), torch.tensor(0.3)]
     },
-    pool_probas=[torch.eye(3), torch.eye(3), torch.eye(3)],
+    pool_probas=EXAMPLARY_POOL_PROBAS,
+)
+
+TRIPLE_EXAMPLARY_CONFIG_RESULTS = ConfigurationResults(
+    metrics={
+        LoopMetric.BAC.name: torch.tensor(
+            [
+                EXAMPLARY_METRIC_VALUES,
+                EXAMPLARY_METRIC_VALUES,
+                EXAMPLARY_METRIC_VALUES,
+            ]
+        )
+    },
+    pool_probas=torch.stack(
+        [
+            EXAMPLARY_POOL_PROBAS_TENSOR,
+            EXAMPLARY_POOL_PROBAS_TENSOR,
+            EXAMPLARY_POOL_PROBAS_TENSOR,
+        ]
+    ),
 )
 
 
-@pytest.mark.parametrize(
-    "experiment_results",
-    [
-        {"info1": [EXAMPLARY_LOOP_RESULT]},
-        {
-            "info1": [
-                EXAMPLARY_LOOP_RESULT,
-                EXAMPLARY_LOOP_RESULT,
-                EXAMPLARY_LOOP_RESULT,
-            ],
-            "info2": [
-                EXAMPLARY_LOOP_RESULT,
-                EXAMPLARY_LOOP_RESULT,
-                EXAMPLARY_LOOP_RESULT,
-            ],
-        },
-        dict(),
-        {"info1": []},
-        {
-            "info1": [
-                EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS,
-                EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS,
-            ]
-        },
-        {
-            "a": [
-                LoopResults.model_validate(
-                    {
-                        "metrics": {
-                            "BAC": [
-                                tensor(0.4616),
-                                tensor(0.4614),
-                                tensor(0.4806),
-                            ]
+@pytest.fixture(
+    params=[
+        (
+            {"info1": [EXAMPLARY_LOOP_RESULT]},
+            ExperimentResults(
+                res={
+                    "info1": ConfigurationResults(
+                        metrics={
+                            LoopMetric.BAC.name: torch.tensor([EXAMPLARY_METRIC_VALUES])
                         },
-                        "pool_probas": [
-                            tensor(
+                        pool_probas=EXAMPLARY_POOL_PROBAS_TENSOR.unsqueeze(0),
+                    )
+                }
+            ),
+        ),
+        (
+            {
+                "info1": [
+                    EXAMPLARY_LOOP_RESULT,
+                    EXAMPLARY_LOOP_RESULT,
+                    EXAMPLARY_LOOP_RESULT,
+                ],
+                "info2": [
+                    EXAMPLARY_LOOP_RESULT,
+                    EXAMPLARY_LOOP_RESULT,
+                    EXAMPLARY_LOOP_RESULT,
+                ],
+            },
+            ExperimentResults(
+                res={
+                    "info1": TRIPLE_EXAMPLARY_CONFIG_RESULTS,
+                    "info2": TRIPLE_EXAMPLARY_CONFIG_RESULTS,
+                }
+            ),
+        ),
+        (dict(), ExperimentResults(res={})),
+        (
+            {"info1": []},
+            ExperimentResults(
+                res={"info1": ConfigurationResults(metrics={}, pool_probas=None)}
+            ),
+        ),
+        (
+            {
+                "info1": [
+                    EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS,
+                    EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS,
+                ]
+            },
+            ExperimentResults(
+                res={
+                    "info1": ConfigurationResults(
+                        metrics={
+                            LoopMetric.BAC.name: torch.tensor(
+                                [EXAMPLARY_METRIC_VALUES, EXAMPLARY_METRIC_VALUES]
+                            )
+                        },
+                        pool_probas=torch.stack(
+                            [EXAMPLARY_POOL_PROBAS_TENSOR, EXAMPLARY_POOL_PROBAS_TENSOR]
+                        ),
+                    )
+                }
+            ),
+        ),
+        (
+            {
+                "a": [
+                    LoopResults.model_validate(
+                        {
+                            "metrics": {
+                                "BAC": [
+                                    tensor(0.4616),
+                                    tensor(0.4614),
+                                    tensor(0.4806),
+                                ]
+                            },
+                            "pool_probas": [
+                                tensor(
+                                    [
+                                        [0.5, 0.3, 0.2, 0.0],
+                                        [0.5, 0.1, 0.4, 0.0],
+                                        [0.5, 0.1, 0.4, 0.0],
+                                    ]
+                                ),
+                                tensor(
+                                    [
+                                        [
+                                            0.8,
+                                            0.1,
+                                            0.0,
+                                            0.1,
+                                        ],
+                                        [
+                                            0.05,
+                                            0.9,
+                                            0.03,
+                                            0.02,
+                                        ],
+                                    ]
+                                ),
+                            ],
+                        }
+                    )
+                ]
+            },
+            ExperimentResults(
+                res={
+                    "a": ConfigurationResults(
+                        metrics={
+                            LoopMetric.BAC.name: torch.tensor(
                                 [
                                     [
-                                        0.5,
-                                        0.3,
-                                        0.2,
-                                    ],
-                                    [
-                                        0.5,
-                                        0.1,
-                                        0.4,
-                                    ],
+                                        tensor(0.4616),
+                                        tensor(0.4614),
+                                        tensor(0.4806),
+                                    ]
                                 ]
-                            ),
-                            tensor(
-                                [
+                            )
+                        },
+                        pool_probas=torch.stack(
+                            [
+                                tensor(
                                     [
-                                        0.8,
-                                        0.1,
-                                        0.0,
-                                        0.1,
-                                    ],
+                                        [0.5, 0.3, 0.2, 0.0],
+                                        [0.5, 0.1, 0.4, 0.0],
+                                        [0.5, 0.1, 0.4, 0.0],
+                                    ]
+                                ),
+                                tensor(
                                     [
-                                        0.05,
-                                        0.9,
-                                        0.03,
-                                        0.02,
-                                    ],
-                                ]
-                            ),
-                        ],
-                    }
-                )
-            ]
-        },
-    ],
+                                        [
+                                            0.8,
+                                            0.1,
+                                            0.0,
+                                            0.1,
+                                        ],
+                                        [
+                                            0.05,
+                                            0.9,
+                                            0.03,
+                                            0.02,
+                                        ],
+                                        [
+                                            torch.nan,
+                                            torch.nan,
+                                            torch.nan,
+                                            torch.nan,
+                                        ],
+                                    ]
+                                ),
+                            ],
+                        ).unsqueeze(0),
+                    )
+                }
+            ),
+        ),
+    ]
 )
+def experiment_results_with_loop_results_collection(request: pytest.FixtureRequest):
+    return request.param
+
+
+@pytest.fixture
+def experiment_results(experiment_results_with_loop_results_collection):
+    return experiment_results_with_loop_results_collection[1]
+
+
+@pytest.fixture
+def loop_results_collection(experiment_results_with_loop_results_collection):
+    return experiment_results_with_loop_results_collection[0]
+
+
+def test_experiment_results_from_loop_results_conversion(
+    experiment_results_with_loop_results_collection,
+):
+    loop_results_collection = experiment_results_with_loop_results_collection[0]
+    expected_experiment_result = experiment_results_with_loop_results_collection[1]
+
+    assert (
+        ExperimentResults.from_loop_results(loop_results_collection)
+        == expected_experiment_result
+    )
+
+
 def test_save_results_is_loadable(experiment_results: ExperimentResults):
+    # TODO: swap to new implementation
     with tempfile.TemporaryDirectory() as tmpdir:
         result_file_path = pathlib.Path(tmpdir, "results.bin")
-        save_results(path=result_file_path, results=experiment_results)
-        loaded_results = load_results(result_file_path)
+        experiment_results.save(
+            path=result_file_path,
+        )
+        loaded_results = ExperimentResults.load(result_file_path)
+
     assert loaded_results == experiment_results
 
 
@@ -240,7 +385,7 @@ def test_run_experiments_save_results_is_loaded(config: LoopConfig):
     )
     with tempfile.TemporaryDirectory() as tmpdir:
         result_file_path = pathlib.Path(tmpdir, "results.bin")
-        resuts = run_experiment(
+        results = run_experiment(
             active_learning_loop,
             data=dataset,
             model=model,
@@ -252,9 +397,9 @@ def test_run_experiments_save_results_is_loaded(config: LoopConfig):
             infos=[entropy],
             config=config,
         )
-        loaded_results = load_results(result_file_path)
+        loaded_results = ExperimentResults.load(result_file_path)
 
-    assert loaded_results == resuts
+    assert loaded_results == results
 
 
 class MockedModel(ModelProto):

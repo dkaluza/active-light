@@ -19,6 +19,7 @@ def active_learning_loop(
     config: LoopConfig,
 ) -> LoopResults:
     results = LoopResults()
+    results.initialize_from_config(config=config)
     used_budget = 0
 
     if config.n_classes is None:

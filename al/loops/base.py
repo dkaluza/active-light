@@ -29,7 +29,7 @@ FloatTensor: TypeAlias = Annotated[torch.FloatTensor, HandleAsAny]
 
 
 class LoopResults(BaseModel):
-    metrics: dict[LoopMetricName, list[float]] = Field(default_factory=dict)
+    metrics: dict[LoopMetricName, list[float]] | None = None
     """
     Metrics obtained after sampling consecutive batches in the loop.
         
@@ -38,7 +38,7 @@ class LoopResults(BaseModel):
     Value at the index 0 correspond to metric obtained before choosing
     any elements in the loop.
     """
-    pool_probas: Sequence[FloatTensor] = Field(default_factory=list)
+    pool_probas: Sequence[FloatTensor] | None = None
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, LoopResults):
@@ -56,6 +56,12 @@ class LoopResults(BaseModel):
                 ]
             )
         )
+
+    def initialize_from_config(self, config: LoopConfig):
+        if len(config.metrics) > 0:
+            self.metrics = {}
+        if config.return_pool_probas:
+            self.pool_probas = []
 
 
 class LoopConfig(BaseModel):
