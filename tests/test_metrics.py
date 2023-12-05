@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from al.sampling.uncert.metrics import (
+from al.sampling.uncert.classification.metrics import (
     _difference_quotient,
     _get_nearest_vertex_position,
 )

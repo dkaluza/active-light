@@ -1,3 +1,4 @@
+import functools
 from typing import Callable, Sequence
 
 import torch
@@ -81,14 +82,25 @@ def add_next_metrics_evaluation(
     test: ALDataset,
     config: LoopConfig,
 ):
-    probas = model.predict_proba(test)
+    metrics = [metric.value(config) for metric in config.metrics]
+    metric_names = [metric.name for metric in config.metrics]
 
-    for metric in config.metrics:
-        metric_fun = metric.value(config)
-        metric_fun.update(probas, test.targets)
+    is_any_metric_proba_based = functools.reduce(
+        lambda val, metric: val or metric.is_distribution_based, metrics, False
+    )
+    is_any_metric_not_proba_based = functools.reduce(
+        lambda val, metric: val or not metric.is_distribution_based, metrics, False
+    )
+
+    probas = model.predict_proba(test) if is_any_metric_proba_based else None
+    preds = model.predict(test) if is_any_metric_not_proba_based else None
+
+    for metric_name, metric_fun in zip(metric_names, metrics):
+        metric_input = probas if metric_fun.is_distribution_based else preds
+        metric_fun.update(metric_input, test.targets)
         score = metric_fun.compute()
 
-        results.metrics.setdefault(metric.name, []).append(score)
+        results.metrics.setdefault(metric_name, []).append(score)
 
 
 def add_pool_probas(

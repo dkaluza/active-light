@@ -1,10 +1,11 @@
 import pathlib
 import tempfile
-from typing import Callable, Sequence
+from typing import Callable
 from unittest.mock import Mock
 
 import pytest
 import torch
+from ngboost import NGBRegressor
 from torch import tensor
 from torch.utils.data import Dataset, TensorDataset
 from xgboost import XGBRFClassifier
@@ -16,14 +17,14 @@ from al.loops.experiments import (
     ConfigurationResults,
     ExperimentResults,
     NClassesGuaranteeWrapper,
+    NGBoostRegressionWrapper,
     XGBWrapper,
+    add_uncert_metric_for_max_uncert_proba,
     add_uncert_metric_for_probas,
-    load_results,
-    save_results,
 )
 from al.loops.perfect_oracle import active_learning_loop
-from al.sampling.uncert.classical import entropy
-from al.sampling.uncert.metrics import (
+from al.sampling.uncert import entropy, eveal, least_confidence, margin, variance
+from al.sampling.uncert.classification.metrics import (
     monotonicity_from_vertex,
     prior_descent_ratio,
     simplex_vertex_repel_ratio,
@@ -113,7 +114,7 @@ def test_al_loop_experiment_generates_scores_for_metrics():
         def predict_proba(self, data: Dataset) -> torch.FloatTensor:
             return torch.full((len(data), 2), fill_value=0.5, dtype=torch.float)
 
-    target = torch.ones(1000)
+    target = torch.ones(1000, dtype=torch.long)
     results = run_experiment(
         active_learning_loop,
         data=TensorDataset(torch.arange(1000).unsqueeze(1), target),
@@ -367,22 +368,49 @@ def test_save_results_is_loadable(experiment_results: ExperimentResults):
     assert loaded_results == experiment_results
 
 
+CLASSIFICATION_MODEL = XGBWrapper(
+    XGBRFClassifier(n_jobs=1, objective="multi:softprob", num_class=2, n_estimators=10)
+)
+REGRESSION_MODEL = NGBoostRegressionWrapper(NGBRegressor(n_estimators=10))
+
+CLASSIFICATION_DATASET = TensorDataset(
+    torch.rand((20, 5)),
+    torch.tensor([0, 1] * 10, dtype=torch.long),
+)
+REGRESSION_DATASET = TensorDataset(
+    torch.rand((20, 5)),
+    torch.rand((20,)),
+)
+
+
 @pytest.mark.parametrize(
-    "config",
+    "config, model, infos, dataset",
     [
-        LoopConfig(),
-        LoopConfig(metrics=[LoopMetric.BAC]),
-        LoopConfig(metrics=[LoopMetric.BAC], return_pool_probas=True),
+        (LoopConfig(), CLASSIFICATION_MODEL, [entropy], CLASSIFICATION_DATASET),
+        (
+            LoopConfig(metrics=[LoopMetric.BAC]),
+            CLASSIFICATION_MODEL,
+            [entropy],
+            CLASSIFICATION_DATASET,
+        ),
+        (
+            LoopConfig(metrics=[LoopMetric.BAC], return_pool_probas=True),
+            CLASSIFICATION_MODEL,
+            [entropy],
+            CLASSIFICATION_DATASET,
+        ),
+        (LoopConfig(), REGRESSION_MODEL, [variance, eveal], REGRESSION_DATASET),
+        (
+            LoopConfig(metrics=[LoopMetric.R2]),
+            REGRESSION_MODEL,
+            [variance, eveal],
+            REGRESSION_DATASET,
+        ),
     ],
 )
-def test_run_experiments_save_results_is_loaded(config: LoopConfig):
-    dataset = TensorDataset(
-        torch.rand((20, 5)),
-        torch.tensor([0, 1] * 10, dtype=torch.long),
-    )
-    model = XGBWrapper(
-        XGBRFClassifier(n_jobs=1, objective="multi:softprob", num_class=2)
-    )
+def test_run_experiments_save_results_is_loaded(
+    config: LoopConfig, model, infos, dataset
+):
     with tempfile.TemporaryDirectory() as tmpdir:
         result_file_path = pathlib.Path(tmpdir, "results.bin")
         results = run_experiment(
@@ -394,7 +422,7 @@ def test_run_experiments_save_results_is_loaded(config: LoopConfig):
             budget=2,
             n_repeats=1,
             save_path=result_file_path,
-            infos=[entropy],
+            infos=infos,
             config=config,
         )
         loaded_results = ExperimentResults.load(result_file_path)
@@ -451,14 +479,7 @@ def test_nclassesguranteewrapper_maintains_probas(dataset, n_classes):
 
 @pytest.mark.parametrize(
     "experiment_results",
-    [
-        {
-            entropy.__name__: [
-                EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS,
-                EXAMPLARY_LOOP_RESULT_WTIH_TENSORS_AS_METRICS,
-            ]
-        }
-    ],
+    [ExperimentResults(res={entropy.__name__: TRIPLE_EXAMPLARY_CONFIG_RESULTS})],
 )
 @pytest.mark.parametrize(
     "metric_func",
@@ -475,7 +496,91 @@ def test_add_uncert_metric_for_probas_adds_metric(
     add_uncert_metric_for_probas(
         experiment_results, uncerts=[entropy], metric=metric_func, name="test"
     )
-    for _, val in experiment_results.items():
-        for loop_result in val:
-            assert "test" in loop_result.metrics
-            assert len(loop_result.metrics["test"]) == len(loop_result.pool_probas)
+    for _, val in experiment_results.res.items():
+        assert "test" in val.metrics
+        assert val.metrics["test"].shape[:2] == val.pool_probas.shape[:2]
+
+
+@pytest.mark.parametrize(
+    "uncert_func, expected_most_uncert_sample",
+    [
+        (entropy, [0.25, 0.25, 0.25, 0.25]),
+        (least_confidence, [0.25, 0.25, 0.25, 0.25]),
+        (margin, [0.45, 0.45, 0.1, 0]),
+    ],
+)
+@pytest.mark.parametrize(
+    "metric_func",
+    [
+        monotonicity_from_vertex,
+        simplex_vertex_repel_ratio,
+        uncert_maximum_descent_ratio,
+        prior_descent_ratio,
+    ],
+)
+def test_add_uncert_metric_for_max_uncert_proba_adds_metric_for_appropriate_sample(
+    uncert_func, metric_func, expected_most_uncert_sample
+):
+    experiment_results: ExperimentResults = ExperimentResults(
+        res={
+            uncert_func.__name__: ConfigurationResults(
+                metrics={},
+                pool_probas=torch.tensor(
+                    [
+                        [torch.nan, torch.nan, torch.nan, torch.nan],
+                        [1.0, 0, 0, 0],
+                        [0.5, 0.4, 0.1, 0],
+                        [0.45, 0.45, 0.1, 0],
+                        [0.25, 0.25, 0.25, 0.25],
+                    ]
+                )
+                .unsqueeze(0)  # adding seeds and iterations dims
+                .unsqueeze(0),
+            ),
+        }
+    )
+    add_uncert_metric_for_max_uncert_proba(
+        experiment_results, uncerts=[uncert_func], metric=metric_func, name="test"
+    )
+    for _, val in experiment_results.res.items():
+        assert "test" in val.metrics
+        assert val.metrics["test"].shape[:2] == val.pool_probas.shape[:2]
+        assert torch.allclose(
+            val.metrics["test"],
+            metric_func(
+                func=uncert_func,
+                distribution=torch.tensor(expected_most_uncert_sample).reshape(
+                    1, 1, 1, -1
+                ),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "uncert_func",
+    [
+        entropy,
+        least_confidence,
+        margin,
+    ],
+)
+@pytest.mark.parametrize(
+    "distibution",
+    [
+        torch.eye(10) * 0.9
+        + 0.01,  # we are avoding "pure" points as they are not differenetiable
+        torch.concatenate(
+            [torch.full((8, 4), 1.05 / 8), torch.full((8, 4), 0.95 / 8)], dim=1
+        ),
+        torch.nn.functional.normalize(torch.rand((8, 8)), dim=-1, p=1),
+    ],
+)
+def test_uncert_maximum_descent_ratio_0_is_prior_descent_ratio(
+    uncert_func, distibution
+):
+    prior_descent_values = prior_descent_ratio(uncert_func, distribution=distibution)
+    uncdert_max_values = uncert_maximum_descent_ratio(
+        uncert_func, distribution=distibution
+    )
+
+    assert torch.allclose(prior_descent_values, uncdert_max_values[..., 0], rtol=1e-4)

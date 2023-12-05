@@ -12,17 +12,13 @@ def plot_metric(
     metric_name: LoopMetricName,
     metric_slice: slice = None,
 ):
-    for info_name, loop_result_for_seed in experiment_results.items():
-        metric_values = [
-            loop_result.metrics[metric_name] for loop_result in loop_result_for_seed
-        ]
-        metric_values = torch.tensor(metric_values)
+    for config_name, config_results in experiment_results.res.items():
+        metric_values = config_results.metrics[metric_name]
         if metric_slice is not None:
             metric_values = metric_values[metric_slice]
         metric_avg_over_seeds = metric_values.mean(dim=0)
         iterations = torch.arange(metric_avg_over_seeds.shape[0])
 
-        plt.plot(iterations, metric_avg_over_seeds, label=info_name)
+        plt.plot(iterations, metric_avg_over_seeds, label=config_name)
 
     plt.legend()
-    plt.show()

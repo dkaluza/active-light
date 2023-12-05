@@ -3,7 +3,7 @@ from typing import Callable
 import torch
 from torch.nn.functional import cosine_similarity
 
-from al.sampling.uncert.base import CLASSES_DIM
+from al.sampling.uncert.classification.base import CLASSES_DIM
 
 
 def numerical_gradient(
@@ -133,14 +133,13 @@ def uncert_maximum_descent_ratio(func, distribution):
     distribution = distribution.reshape(-1, n_classes)
 
     distribution, gradient = torch_gradient(func, distribution=distribution)
-    uncertainty_max_points = torch.zeros(
-        distribution.shape[0], n_classes - 1, n_classes
-    )
-    uncertainty_dist_values = 1 / torch.arange(n_classes, 1, -1)
+    uncertainty_max_points_shape = (distribution.shape[0], n_classes - 1, n_classes)
+    top_k_classes = torch.arange(n_classes, 1, -1)
+    uncertainty_dist_values = 1 / top_k_classes
     uncertainty_dist_values = (
         uncertainty_dist_values.unsqueeze(0)
         .unsqueeze(-1)
-        .expand_as(uncertainty_max_points)
+        .expand(uncertainty_max_points_shape)
     )
     # we take upper triangular part to have probability divided to decreasing number
     # of classes in every row
@@ -148,21 +147,54 @@ def uncert_maximum_descent_ratio(func, distribution):
     uncertainty_dist_values = torch.triu(uncertainty_dist_values)
 
     # descending sort will match the upper triangular with values
-    order = torch.argsort(distribution, dim=CLASSES_DIM, descending=False)
+    dist_sort = torch.sort(distribution, dim=CLASSES_DIM, descending=False)
+    order = dist_sort.indices
+    ordered_dist = dist_sort.values
 
-    uncertainty_max_points.scatter_(
-        dim=-1,
-        index=order.unsqueeze(1).expand_as(uncertainty_max_points),
-        src=uncertainty_dist_values,
+    # top k values become an average of top k values in the distribution
+    uncertainty_top_values = ordered_dist.unsqueeze(1) * uncertainty_dist_values
+    uncertainty_top_values = torch.sum(
+        uncertainty_top_values, dim=CLASSES_DIM, keepdim=True
+    )
+    uncertainty_top_values = torch.triu(
+        uncertainty_top_values.expand(uncertainty_max_points_shape)
     )
 
+    # we fill the rest values(not the top k) with uniform distribution of remaining proba
+    rest_values = (
+        1 - torch.sum(uncertainty_top_values, dim=CLASSES_DIM, keepdim=True)
+    ) / (n_classes - top_k_classes).unsqueeze(0).unsqueeze(-1)
+
+    rest_values = torch.tril(
+        rest_values.expand(uncertainty_max_points_shape), diagonal=-1
+    )
+    uncertainty_max_points_sorted = rest_values + uncertainty_top_values
+
+    # as our uncertainty_max_points_sorted are sorted and gradient and distribution are not
+    # we have to apply the same ordering to them
     reuslts = cosine_similarity(
-        gradient.unsqueeze(1),
-        uncertainty_max_points - distribution.unsqueeze(1),
+        torch.take_along_dim(gradient, order, dim=CLASSES_DIM).unsqueeze(1),
+        uncertainty_max_points_sorted
+        - torch.take_along_dim(distribution, order, dim=CLASSES_DIM).unsqueeze(1),
         dim=CLASSES_DIM,
     )
 
     return reuslts.reshape([*original_shape[:-1], n_classes - 1])
+
+
+def max_uncert_maximum_descent_ratio(func, distribution):
+    results = uncert_maximum_descent_ratio(func, distribution)
+    return results.max(dim=-1).values
+
+
+def max_uncert(func, distribution):
+    results = func(distribution)
+    return results
+
+
+def sum_uncert_maximum_descent_ratio(func, distribution):
+    results = uncert_maximum_descent_ratio(func, distribution)
+    return results.sum(dim=-1)
 
 
 def simplex_vertex_repel_ratio(func, distribution):
@@ -199,3 +231,21 @@ def _get_nearest_vertex_position(distribution: torch.FloatTensor) -> torch.Float
         src=torch.ones_like(vertex_position),
     )
     return vertex_position
+
+
+def get_uncert_quntile_order(
+    func, distribution: torch.FloatTensor
+) -> torch.FloatTensor:
+    n_classes = distribution.shape[CLASSES_DIM]
+    n_values = 1_000_000
+
+    probas = torch.rand((n_values, n_classes))
+    probas = torch.nn.functional.normalize(probas, p=1, dim=1)
+
+    searched_uncerts = func(distribution)
+    uncert_values = func(probas)
+    sorted_uncerts = torch.sort(uncert_values).values
+
+    indices = torch.searchsorted(sorted_uncerts, searched_uncerts)
+    qunatiles_order = indices / n_values
+    return qunatiles_order

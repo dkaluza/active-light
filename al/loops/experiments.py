@@ -1,22 +1,25 @@
 from __future__ import annotations
 
-from typing import Any, Callable, NamedTuple, Sequence, TypeAlias
+import enum
+from typing import Any, Callable, NamedTuple, Self, Sequence, TypeAlias
 
+import ngboost
 import numpy as np
 import openml
 import ormsgpack as msgpack
 import pandas as pd
 import sklearn
 import torch
+from ngboost.distns import Normal, RegressionDistn
 from pydantic import BaseModel
 from torch.utils.data import Dataset, TensorDataset, random_split
 from tqdm.auto import tqdm
 from xgboost import XGBModel
 
-from al.base import ModelProto
+from al.base import ModelProto, RegressionModelProto
 from al.loops.base import ALDataset, FloatTensor, LoopMetricName, LoopResults
 from al.sampling.base import InformativenessProto
-from al.sampling.uncert.base import UncertBase
+from al.sampling.uncert.classification.base import UncertClassificationBase
 
 EXPERIMENT_RESULTS_SERIALIZE_EXTENSION = 9
 LOOP_RESULTS_SERIALIZE_EXTENSION = 10
@@ -87,7 +90,7 @@ class ConfigurationResults(BaseModel):
     padded with NaNs at the end(e.g. classical active learning perfect oracles loop).
     Please keep in mind that due to samples removal and padding the order of samples
     is not maintained after the iterations. 
-    The shape of probas is (n_seeds, n_iterations, n_samples).
+    The shape of probas is (n_seeds, n_iterations, n_samples, n_classes).
     """
 
     def __eq__(self, other: Any) -> bool:
@@ -297,7 +300,7 @@ def create_AL_dataset_from_openml(dataset_id: int) -> CreateALDatasetResult:
 
 def add_uncert_metric_for_probas(
     results: ExperimentResults,
-    uncerts: Sequence[UncertBase],
+    uncerts: Sequence[UncertClassificationBase],
     metric: Callable[..., torch.FloatTensor],
     name: str | None = None,
 ) -> ExperimentResults:
@@ -330,25 +333,59 @@ def add_uncert_metric_for_probas(
     uncerts = dict([(uncert.__name__, uncert) for uncert in uncerts])
 
     with tqdm(total=len(uncerts), desc="Uncerts:") as progress_bar:
-        for info_name, loop_results_for_seeds in results.items():
-            uncert = uncerts[info_name]
+        for config_name, config_results in results.res.items():
+            uncert = uncerts[config_name]
 
-            # shape of probas (n_samples, n_seeds, n_iters, n_classes)
-            probas = torch.stack(
-                [
-                    torch.nn.utils.rnn.pad_sequence(
-                        loop_result.pool_probas, padding_value=torch.nan
-                    )
-                    for loop_result in loop_results_for_seeds
-                ],
-                dim=1,
-            )
-            metric_values = metric(func=uncert, distribution=probas).nanmean(dim=0)
-            for metric_value, loop_result in zip(metric_values, loop_results_for_seeds):
-                loop_result.metrics[metric_name] = metric_value.tolist()
+            # shape of probas (n_seeds, n_iters, n_samples, n_classes)
+            probas = config_results.pool_probas
+            metric_values = metric(func=uncert, distribution=probas).nanmean(dim=2)
+            config_results.metrics[metric_name] = metric_values
             progress_bar.update(1)
 
     return results
+
+
+def add_uncert_metric_for_max_uncert_proba(
+    results: ExperimentResults,
+    uncerts: Sequence[UncertClassificationBase],
+    metric: Callable[..., torch.FloatTensor],
+    name: str | None = None,
+) -> ExperimentResults:
+    metric_name = name if name is not None else metric.__name__
+    uncerts = dict([(uncert.__name__, uncert) for uncert in uncerts])
+
+    with tqdm(total=len(uncerts), desc="Uncerts:") as progress_bar:
+        for config_name, config_results in results.res.items():
+            uncert = uncerts[config_name]
+
+            # shape of probas (n_seeds, n_iters, n_samples, n_classes)
+            samples_dim = 2
+            classes_dim = -1
+
+            probas = config_results.pool_probas
+            uncert_values = uncert(probas=probas)
+            max_uncert_proba_idx = nanargmax(
+                uncert_values, dim=samples_dim, keepdim=True
+            )
+            selected_proba = torch.take_along_dim(
+                probas, max_uncert_proba_idx.unsqueeze(dim=classes_dim), dim=samples_dim
+            )
+            selected_proba = selected_proba.unsqueeze(samples_dim)
+
+            # there should be only one element in the 2 dim
+            metric_values = metric(func=uncert, distribution=selected_proba)[:, :, 0]
+            config_results.metrics[metric_name] = metric_values
+            progress_bar.update(1)
+
+    return results
+
+
+# insipired by https://github.com/pytorch/pytorch/issues/61474 amitabe post
+# workaround for no torch nanargmax
+def nanargmax(tensor, dim=None, keepdim=False):
+    min_value = torch.finfo(tensor.dtype).min
+    indices = tensor.nan_to_num(min_value).max(dim=dim, keepdim=keepdim).indices
+    return indices
 
 
 class XGBWrapper(ModelProto):
@@ -420,3 +457,86 @@ class NClassesGuaranteeWrapper(ModelProto):
             probas = predicted_probas
 
         return probas
+
+
+class NGBoostDist(enum.Enum):
+    Normal = "normal"
+
+
+def get_NGBoostDist(dist) -> NGBoostDist:
+    if dist == Normal:
+        return NGBoostDist.Normal
+
+    raise NotImplementedError()
+
+
+class NGBoostRegressionWrapper(RegressionModelProto):
+    """NGBoost wrapper implementing regression model proto.
+
+
+    The distribution params are always torch tensor of parameters stacked in dim=1.
+    The order of parameters is as follows for the implemented distributions:
+    Normal - [loc, scale]
+
+    """
+
+    def __new__(cls, model: ngboost.NGBRegressor) -> Self:
+        dist = get_NGBoostDist(model.Dist)
+        if dist == NGBoostDist.Normal:
+            return super().__new__(NGBoostRegressionNormalWrapper)
+
+    def __init__(self, model: ngboost.NGBRegressor) -> None:
+        super().__init__()
+        self.model = model
+
+    def fit(self, train: Dataset):
+        train = ALDataset(train)
+        features = train.features
+        targets = train.targets
+        print(targets)
+        self.model.fit(features.numpy(), targets.numpy())
+
+    def predict_proba(self, data: Dataset) -> FloatTensor:
+        data = ALDataset(data)
+        features = data.features
+
+        dist_params = self.model.pred_dist(features)
+        dist_params = self._get_params_based_on_dist(dist_params)
+        return dist_params
+
+    def _get_params_based_on_dist(self, dist: RegressionDistn):
+        return torch.stack(
+            [
+                torch.from_numpy(dist.loc),
+                torch.from_numpy(dist.scale),
+            ],
+            dim=1,
+        )
+
+    def predict(self, data: Dataset) -> FloatTensor:
+        data = ALDataset(data)
+        features = data.features
+
+        preds = self.model.predict(features)
+        return torch.from_numpy(preds)
+
+
+class NGBoostRegressionNormalWrapper(NGBoostRegressionWrapper):
+    """
+    An NGBoost regression wrapper with model predicting normal distribution.
+
+    Params of the model are always represented with torch tensor with
+    (n_samples, n_params) shape with: loc as a first param and scale as the second.
+
+    """
+
+    def get_variance(self, distribution_params: torch.Tensor) -> torch.FloatTensor:
+        return distribution_params[:, 1] ** 2
+
+    def get_mode(self, distribution_params: torch.Tensor) -> torch.FloatTensor:
+        return distribution_params[:, 0]
+
+    def get_expected_value(
+        self, distribution_params: torch.Tensor
+    ) -> torch.FloatTensor:
+        return distribution_params[:, 0]

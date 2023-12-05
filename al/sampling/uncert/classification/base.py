@@ -10,20 +10,14 @@ from al.sampling.base import InformativenessProto
 CLASSES_DIM = -1
 
 
-def select_by_classes_dim(tensor: torch.Tensor, slice_to_select: slice | int):
-    indexing = [slice(None, None) for _ in tensor.shape]
-    indexing[CLASSES_DIM] = slice_to_select
-    return tensor[*indexing]
-
-
-class UncertBase(InformativenessProto, abc.ABC):
+class UncertClassificationBase(InformativenessProto, abc.ABC):
     @abc.abstractmethod
     def _call(self, probas: torch.FloatTensor) -> torch.FloatTensor:
         ...
 
     def __call__(
         self,
-        probas: torch.Tensor = None,
+        probas: torch.FloatTensor = None,
         model: ModelProto | None = None,
         dataset: Dataset | None = None,
     ) -> torch.FloatTensor:

@@ -2,23 +2,64 @@ from __future__ import annotations
 
 import enum
 import functools
-from typing import Annotated, Any, Sequence, TypeAlias
+from typing import Annotated, Any, Iterable, Self, Sequence, TypeAlias
 
 import torch
-from pydantic import BaseModel, ConfigDict, Field, GetPydanticSchema
+from pydantic import BaseModel, Field, GetPydanticSchema
+from torch._tensor import Tensor
 from torch.utils.data import DataLoader, Dataset, IterableDataset, TensorDataset
 from torcheval import metrics
+from torcheval.metrics.metric import Metric
 
 
-def create_BAC_metric(config: LoopConfig):
+class MetricWrapper(Metric[torch.Tensor]):
+    def __init__(
+        self: Self,
+        *,
+        metric: Metric,
+        is_distribution_based: bool,
+        device: torch.device | None = None,
+    ) -> None:
+        super().__init__(device=device)
+        self.metric = metric.to(device=device)
+        self.is_distribution_based = is_distribution_based
+
+    def update(self: Self, *_: Any, **__: Any) -> Self:
+        self.metric.update(*_, **__)
+        return self
+
+    def compute(self: Self) -> Tensor:
+        return self.metric.compute()
+
+    def merge_state(self: Self, metrics: Iterable[Self]) -> Self:
+        self.metric.merge_state(metrics)
+        return self
+
+
+def create_BAC_metric(config: LoopConfig) -> MetricWrapper:
     assert config.n_classes
-    return metrics.MulticlassAccuracy(average="macro", num_classes=config.n_classes)
+    metric = MetricWrapper(
+        metric=metrics.MulticlassAccuracy(
+            average="macro", num_classes=config.n_classes
+        ),
+        is_distribution_based=True,
+    )
+    return metric
+
+
+def create_R2_metric(config: LoopConfig) -> MetricWrapper:
+    metric = MetricWrapper(
+        metric=metrics.R2Score(),
+        is_distribution_based=False,
+    )
+    return metric
 
 
 class LoopMetric(enum.Enum):
     # we are wrapping enum values with partial
     # otherwise it is interpreted as method of the LoopMetric class
     BAC = functools.partial(create_BAC_metric)
+    R2 = functools.partial(create_R2_metric)
 
 
 LoopMetricName: TypeAlias = str
@@ -137,7 +178,12 @@ class ALDatasetWithoutTargets(Dataset, metaclass=TransparentWrapperMeta):
 
 # Note: only single label classification supported for now
 class ALDataset(ALDatasetWithoutTargets):
-    _targets: torch.IntTensor | None = None
+    _targets: torch.Tensor | None = None
+    _targets_dtype: torch.dtype
+
+    def __init__(self, dataset: Dataset, targets_dtype=None) -> None:
+        super().__init__(dataset)
+        self._targets_dtype = targets_dtype
 
     @property
     def targets(self) -> torch.IntTensor:
@@ -149,16 +195,16 @@ class ALDataset(ALDatasetWithoutTargets):
     def _initialize_targets(self):
         targets = []
         if isinstance(self.dataset, TensorDataset):
-            self._targets = self.dataset.tensors[1].long()
+            self._targets = self.dataset.tensors[1].to(dtype=self._targets_dtype)
         else:
             for batch in self._iterate_over_dataset():
                 target_batch = batch[1]
                 targets.append(target_batch)
 
             if len(targets) > 0:
-                self._targets = torch.concat(targets).long()
+                self._targets = torch.concat(targets).to(dtype=self._targets_dtype)
             else:
-                self._targets = torch.empty((0,), dtype=torch.long)
+                self._targets = torch.empty((0,), dtype=self._targets_dtype)
 
     @property
     def n_classes(self):

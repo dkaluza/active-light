@@ -12,6 +12,7 @@ def plot_uncertainty_function(
     func: Callable[[torch.FloatTensor], torch.FloatTensor],
     levels: int = 10,
     step: float = 0.01,
+    colorbar: bool = True,
 ):
     """Plot uncertainty function as a heatmap for
     3 class distribution on a ternary plot.
@@ -41,7 +42,8 @@ def plot_uncertainty_function(
         uncert_values,
         levels=levels,
     )
-    plt.colorbar(mappable=contour_set, pad=0.15)
+    if colorbar:
+        plt.colorbar(mappable=contour_set, shrink=0.5)
 
     # based on
     # https://mpltern.readthedocs.io/en/latest/gallery/axis_and_tick/99.tick_labels_inside_triangle.html#sphx-glr-gallery-axis-and-tick-99-tick-labels-inside-triangle-py
@@ -69,8 +71,11 @@ def plot_uncertainty_function_with_gradients(
     func: Callable[[torch.FloatTensor], torch.FloatTensor],
     levels: int = 10,
     step: float = 0.05,
+    colorbar: bool = True,
+    gradient_colorbar: bool = False,
+    gradient_color_norm=None,
 ):
-    ax = plot_uncertainty_function(func=func, levels=levels)
+    ax = plot_uncertainty_function(func=func, levels=levels, colorbar=colorbar)
     distribution = uniform_mesh(3, step=step)
 
     distribution, gradients = numerical_gradient(func=func, distribution=distribution)
@@ -103,7 +108,9 @@ def plot_uncertainty_function_with_gradients(
         gradient_dr[~undifferentiable],
         length[~undifferentiable],
         cmap="inferno",
+        norm=gradient_color_norm,
     )
-    plt.colorbar(mappable=contour_set, location="bottom")
+    if gradient_colorbar:
+        plt.colorbar(mappable=contour_set, location="bottom")
 
     return ax

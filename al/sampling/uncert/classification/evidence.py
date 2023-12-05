@@ -1,9 +1,9 @@
 import functools
-from typing import Callable, NamedTuple, Sequence
+from typing import Callable, NamedTuple
 
 import torch
 
-from .base import CLASSES_DIM, UncertBase
+from .base import CLASSES_DIM, UncertClassificationBase
 
 
 class ProbaLayers(NamedTuple):
@@ -71,7 +71,7 @@ def _compute_proba_layers(probas: torch.FloatTensor) -> ProbaLayers:
     return ProbaLayers(probas=returned_probas, layers=layers)
 
 
-class PyramidalEvidence(UncertBase):
+class PyramidalEvidence(UncertClassificationBase):
     def __init__(
         self,
         aggregation_function: Callable[
@@ -96,7 +96,7 @@ class PyramidalEvidence(UncertBase):
         return self._name
 
 
-class HeightRatioEvidence(UncertBase):
+class HeightRatioEvidence(UncertClassificationBase):
     def __init__(
         self,
         aggregation_function: Callable[

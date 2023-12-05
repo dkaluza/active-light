@@ -4,17 +4,20 @@ from torch.utils.data import TensorDataset
 from xgboost import XGBRFClassifier
 
 from al.loops.experiments import XGBWrapper
-from al.sampling.uncert import confidence_ratio, entropy, least_confidence, margin
-from al.sampling.uncert.base import UncertBase
-from al.sampling.uncert.evidence import (
-    _compute_proba_layers,
+from al.sampling.uncert import (
+    confidence_ratio,
+    entropy,
     height_ratio_exponent_evidence,
     height_ratio_large_exponent_evidence,
     height_ratio_log_plus_evidence,
+    least_confidence,
+    margin,
     pyramidal_exponent_evidence,
     pyramidal_large_exponent_evidence,
     pyramidal_log_plus_evidence,
 )
+from al.sampling.uncert.classification.base import UncertClassificationBase
+from al.sampling.uncert.classification.evidence import _compute_proba_layers
 
 CLASSICAL_UNCERT_MEASURES = [entropy, least_confidence, margin, confidence_ratio]
 EVIDENCE_BASED_UNCERT_MEASURES = [
@@ -28,7 +31,7 @@ EVIDENCE_BASED_UNCERT_MEASURES = [
 
 
 @pytest.fixture(params=CLASSICAL_UNCERT_MEASURES + EVIDENCE_BASED_UNCERT_MEASURES)
-def uncert_func(request: pytest.FixtureRequest) -> UncertBase:
+def uncert_func(request: pytest.FixtureRequest) -> UncertClassificationBase:
     return request.param
 
 
