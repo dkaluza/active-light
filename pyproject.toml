@@ -48,7 +48,7 @@ xgboost = "^2.0.2"
 scipy = "^1.11.3"
 scikit-learn = "^1.3.2"
 cupy = "^12.2.0"
-ngboost = { git = "https://github.com/jack-mcivor/ngboost.git", branch = "feature/py311" } # TODO: migrate with new release
+xgboost-distribution = "^0.2.8"
 
 
 [build-system]

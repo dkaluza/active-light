@@ -3,18 +3,17 @@ from __future__ import annotations
 import enum
 from typing import Any, Callable, NamedTuple, Self, Sequence, TypeAlias
 
-import ngboost
 import numpy as np
 import openml
 import ormsgpack as msgpack
 import pandas as pd
 import sklearn
 import torch
-from ngboost.distns import Normal, RegressionDistn
 from pydantic import BaseModel
 from torch.utils.data import Dataset, TensorDataset, random_split
 from tqdm.auto import tqdm
 from xgboost import XGBModel
+from xgboost_distribution import XGBDistribution
 
 from al.base import ModelProto, RegressionModelProto
 from al.loops.base import ALDataset, FloatTensor, LoopMetricName, LoopResults
@@ -290,9 +289,16 @@ def create_AL_dataset_from_openml(dataset_id: int) -> CreateALDatasetResult:
             ],
             axis=1,
         )
+
+    dataset_Y = (
+        dataset_Y.cat.codes.to_numpy(dtype=np.int64)
+        if dataset_Y.dtype == pd.CategoricalDtype
+        else dataset_Y.to_numpy()
+    )
+
     dataset_X, dataset_Y = torch.tensor(
         dataset_X.to_numpy(dtype=np.float64)
-    ), torch.tensor(dataset_Y.cat.codes.to_numpy(dtype=np.int64))
+    ), torch.tensor(dataset_Y)
 
     dataset = ALDataset(TensorDataset(dataset_X, dataset_Y))
     return CreateALDatasetResult(dataset, cat_features, attr_names)
@@ -459,18 +465,18 @@ class NClassesGuaranteeWrapper(ModelProto):
         return probas
 
 
-class NGBoostDist(enum.Enum):
-    Normal = "normal"
+class RegressionDist(enum.Enum):
+    NORMAL = "normal"
 
 
-def get_NGBoostDist(dist) -> NGBoostDist:
-    if dist == Normal:
-        return NGBoostDist.Normal
+def get_regression_dist(dist_name) -> RegressionDist:
+    if dist_name == "normal":
+        return RegressionDist.NORMAL
 
     raise NotImplementedError()
 
 
-class NGBoostRegressionWrapper(RegressionModelProto):
+class XGBDistributionRegressionWrapper(RegressionModelProto):
     """NGBoost wrapper implementing regression model proto.
 
 
@@ -480,12 +486,12 @@ class NGBoostRegressionWrapper(RegressionModelProto):
 
     """
 
-    def __new__(cls, model: ngboost.NGBRegressor) -> Self:
-        dist = get_NGBoostDist(model.Dist)
-        if dist == NGBoostDist.Normal:
-            return super().__new__(NGBoostRegressionNormalWrapper)
+    def __new__(cls, model: XGBDistribution) -> Self:
+        dist = get_regression_dist(model.distribution)
+        if dist == RegressionDist.NORMAL:
+            return super().__new__(XGBDistributionRegressionNormalWrapper)
 
-    def __init__(self, model: ngboost.NGBRegressor) -> None:
+    def __init__(self, model: XGBDistribution) -> None:
         super().__init__()
         self.model = model
 
@@ -493,35 +499,46 @@ class NGBoostRegressionWrapper(RegressionModelProto):
         train = ALDataset(train)
         features = train.features
         targets = train.targets
-        print(targets)
-        self.model.fit(features.numpy(), targets.numpy())
+
+        features, targets = features.numpy(), targets.numpy()
+        self.model.fit(features, targets)
 
     def predict_proba(self, data: Dataset) -> FloatTensor:
         data = ALDataset(data)
         features = data.features
 
-        dist_params = self.model.pred_dist(features)
+        dist_params = self.model.predict(features)
         dist_params = self._get_params_based_on_dist(dist_params)
         return dist_params
 
-    def _get_params_based_on_dist(self, dist: RegressionDistn):
-        return torch.stack(
-            [
-                torch.from_numpy(dist.loc),
-                torch.from_numpy(dist.scale),
-            ],
-            dim=1,
+    def predict(self, data: Dataset) -> FloatTensor:
+        dist_params = self.predict_proba(data)
+        return self.get_mode(dist_params)
+
+    def _get_params_based_on_dist(self, dist) -> torch.Tensor:
+        raise NotImplementedError(
+            "Should be implemented in class handling appropriate distribution"
         )
 
-    def predict(self, data: Dataset) -> FloatTensor:
-        data = ALDataset(data)
-        features = data.features
+    def get_variance(self, distribution_params: torch.Tensor) -> torch.FloatTensor:
+        raise NotImplementedError(
+            "Should be implemented in class handling appropriate distribution"
+        )
 
-        preds = self.model.predict(features)
-        return torch.from_numpy(preds)
+    def get_mode(self, distribution_params: torch.Tensor) -> torch.FloatTensor:
+        raise NotImplementedError(
+            "Should be implemented in class handling appropriate distribution"
+        )
+
+    def get_expected_value(
+        self, distribution_params: torch.Tensor
+    ) -> torch.FloatTensor:
+        raise NotImplementedError(
+            "Should be implemented in class handling appropriate distribution"
+        )
 
 
-class NGBoostRegressionNormalWrapper(NGBoostRegressionWrapper):
+class XGBDistributionRegressionNormalWrapper(XGBDistributionRegressionWrapper):
     """
     An NGBoost regression wrapper with model predicting normal distribution.
 
@@ -540,3 +557,12 @@ class NGBoostRegressionNormalWrapper(NGBoostRegressionWrapper):
         self, distribution_params: torch.Tensor
     ) -> torch.FloatTensor:
         return distribution_params[:, 0]
+
+    def _get_params_based_on_dist(self, dist) -> torch.Tensor:
+        return torch.stack(
+            [
+                torch.from_numpy(dist.loc),
+                torch.from_numpy(dist.scale),
+            ],
+            dim=1,
+        )

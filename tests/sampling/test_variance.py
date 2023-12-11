@@ -3,7 +3,7 @@ import torch
 from scipy.stats import norm
 
 from al.sampling.uncert import eveal, variance
-from al.sampling.uncert.regression.variance import UniformKernel
+from al.sampling.uncert.regression.variance_based import UniformKernel
 
 
 @pytest.mark.parametrize(
@@ -26,5 +26,4 @@ def test_kernel_estimation_converges_to_expected_density(
     expected_prob_density = distribution.pdf(x=samples, **dist_kwargs)
     expected_prob_density = torch.from_numpy(expected_prob_density)
     assert estimated_densities.shape == expected_prob_density.shape
-
     assert torch.nn.functional.l1_loss(estimated_densities, expected_prob_density) < 0.1

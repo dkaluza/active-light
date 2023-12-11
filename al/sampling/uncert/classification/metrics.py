@@ -5,6 +5,8 @@ from torch.nn.functional import cosine_similarity
 
 from al.sampling.uncert.classification.base import CLASSES_DIM
 
+# TODO refactor gradients to new file
+
 
 def numerical_gradient(
     func: Callable[[torch.FloatTensor], torch.FloatTensor],

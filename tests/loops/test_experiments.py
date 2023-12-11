@@ -5,10 +5,10 @@ from unittest.mock import Mock
 
 import pytest
 import torch
-from ngboost import NGBRegressor
 from torch import tensor
 from torch.utils.data import Dataset, TensorDataset
 from xgboost import XGBRFClassifier
+from xgboost_distribution import XGBDistribution
 
 from al.base import ModelProto
 from al.loops import run_experiment
@@ -17,7 +17,7 @@ from al.loops.experiments import (
     ConfigurationResults,
     ExperimentResults,
     NClassesGuaranteeWrapper,
-    NGBoostRegressionWrapper,
+    XGBDistributionRegressionWrapper,
     XGBWrapper,
     add_uncert_metric_for_max_uncert_proba,
     add_uncert_metric_for_probas,
@@ -371,7 +371,12 @@ def test_save_results_is_loadable(experiment_results: ExperimentResults):
 CLASSIFICATION_MODEL = XGBWrapper(
     XGBRFClassifier(n_jobs=1, objective="multi:softprob", num_class=2, n_estimators=10)
 )
-REGRESSION_MODEL = NGBoostRegressionWrapper(NGBRegressor(n_estimators=10))
+REGRESSION_MODEL = XGBDistributionRegressionWrapper(
+    XGBDistribution(
+        n_estimators=10,
+        distribution="normal",
+    )
+)
 
 CLASSIFICATION_DATASET = TensorDataset(
     torch.rand((20, 5)),
@@ -379,7 +384,9 @@ CLASSIFICATION_DATASET = TensorDataset(
 )
 REGRESSION_DATASET = TensorDataset(
     torch.rand((20, 5)),
-    torch.rand((20,)),
+    torch.rand(
+        (20,), dtype=torch.double
+    ),  # double becasue of https://github.com/CDonnerer/xgboost-distribution/issues/97
 )
 
 

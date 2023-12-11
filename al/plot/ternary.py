@@ -5,7 +5,7 @@ import mpltern  # pylint: disable=unused-import
 import torch
 
 from al.distributions import uniform_mesh
-from al.sampling.uncert.metrics import numerical_gradient, torch_gradient
+from al.sampling.uncert.classification.metrics import numerical_gradient, torch_gradient
 
 
 def plot_uncertainty_function(

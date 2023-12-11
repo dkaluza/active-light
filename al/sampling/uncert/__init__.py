@@ -12,4 +12,4 @@ from .classification.evidence import (
     pyramidal_large_exponent_evidence,
     pyramidal_log_plus_evidence,
 )
-from .regression.variance import eveal, variance
+from .regression.variance_based import eveal, variance
