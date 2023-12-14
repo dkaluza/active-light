@@ -19,9 +19,9 @@ def test_kernel_estimation_converges_to_expected_density(
     distribution, dist_kwargs, kernel, bandwidth
 ):
     samples = distribution.rvs(**dist_kwargs, size=1_000)
-    estimated_densities = kernel(
-        torch.from_numpy(samples), bandwidth=torch.tensor(bandwidth)
-    )
+    samples = torch.from_numpy(samples)
+    distances = (samples.unsqueeze(0) - samples.unsqueeze(-1)).abs()
+    estimated_densities = kernel(distances, bandwidth=torch.tensor(bandwidth))
     estimated_densities = estimated_densities / len(samples) / bandwidth
     expected_prob_density = distribution.pdf(x=samples, **dist_kwargs)
     expected_prob_density = torch.from_numpy(expected_prob_density)

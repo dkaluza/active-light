@@ -12,4 +12,5 @@ from .classification.evidence import (
     pyramidal_large_exponent_evidence,
     pyramidal_log_plus_evidence,
 )
+from .classification.prior import off_centered_entropy
 from .regression.variance_based import eveal, variance

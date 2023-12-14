@@ -1,10 +1,14 @@
 import pytest
 import torch
 
+from al.sampling.uncert import entropy, least_confidence, margin
 from al.sampling.uncert.classification.metrics import (
     _difference_quotient,
     _get_nearest_vertex_position,
+    prior_descent_ratio,
+    uncert_maximum_descent_ratio,
 )
+from tests.helpers import random_proba
 
 
 @pytest.mark.parametrize(
@@ -76,3 +80,33 @@ def test_compute_quotient_0_samples_tensors():
 
 # TODO: Test for metrics,
 # especially uncert_maximum_descent_ratio
+@pytest.mark.parametrize(
+    "uncert_func",
+    [
+        entropy,
+        least_confidence,
+        margin,
+    ],
+)
+@pytest.mark.parametrize(
+    "distibution",
+    [
+        torch.eye(10) * 0.9
+        + 0.01,  # we are avoding "pure" points as they are not differenetiable
+        torch.concatenate(
+            [torch.full((8, 4), 1.05 / 8), torch.full((8, 4), 0.95 / 8)], dim=1
+        ),
+        random_proba((8, 8)),
+    ],
+)
+def test_uncert_maximum_descent_ratio_0_is_prior_descent_ratio(
+    uncert_func, distibution
+):
+    prior_descent_values = prior_descent_ratio(
+        uncert_func._call, distribution=distibution
+    )
+    uncdert_max_values = uncert_maximum_descent_ratio(
+        uncert_func._call, distribution=distibution
+    )
+
+    assert torch.allclose(prior_descent_values, uncdert_max_values[..., 0], rtol=1e-4)

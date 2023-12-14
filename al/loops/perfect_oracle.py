@@ -1,13 +1,12 @@
 import functools
-from typing import Callable, Sequence
 
 import torch
-from torch.utils.data import ConcatDataset, Dataset, Subset
+from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
 from al.base import ModelProto
-from al.loops.base import ALDataset, LoopConfig, LoopMetric, LoopResults
-from al.sampling.base import InformativenessProto
+from al.loops.base import ALDataset, LoopConfig, LoopResults
+from al.sampling.base import ActiveInMemoryState, ActiveState, InformativenessProto
 
 
 def active_learning_loop(
@@ -22,6 +21,7 @@ def active_learning_loop(
     results = LoopResults()
     results.initialize_from_config(config=config)
     used_budget = 0
+    state = ActiveInMemoryState(model=model, pool=pool, training_data=initial_train)
 
     if config.n_classes is None:
         config.n_classes = test.n_classes
@@ -29,33 +29,28 @@ def active_learning_loop(
     if isinstance(budget, float):
         budget = int(budget * len(pool))
 
-    train = initial_train
-    model.fit(train=train)
+    state.refit_model()
     with torch.no_grad():
         add_next_metrics_evaluation(
-            results=results, model=model, test=test, config=config
+            results=results, state=state, test=test, config=config
         )
-        add_pool_probas(results=results, model=model, pool=pool, config=config)
+        add_pool_probas(results=results, state=state, config=config)
 
     with tqdm(total=budget, leave=None) as progress_bar:
         while used_budget < budget:
             batch_size = min(config.batch_size, budget - used_budget)
-            info_values = info_func(model=model, dataset=pool)
+            info_values = info_func(state=state)
             selected_samples_idx = torch.topk(info_values, k=batch_size, dim=0).indices
             selected_samples_idx = selected_samples_idx.reshape(-1)
 
-            train = ALDataset(
-                ConcatDataset([train, Subset(pool, selected_samples_idx)])
-            )
+            state.select_samples(pool_idx=selected_samples_idx, remove_from_pool=True)
 
-            pool = ALDataset(remove_indices_from_dataset(pool, selected_samples_idx))
-
-            model.fit(train=train)
+            state.refit_model()
             with torch.no_grad():
                 add_next_metrics_evaluation(
-                    results=results, model=model, test=test, config=config
+                    results=results, state=state, test=test, config=config
                 )
-                add_pool_probas(results=results, model=model, pool=pool, config=config)
+                add_pool_probas(results=results, state=state, config=config)
 
             used_budget += batch_size
             progress_bar.update(batch_size)
@@ -63,25 +58,13 @@ def active_learning_loop(
     return results
 
 
-def remove_indices_from_dataset(dataset: Dataset, indices: list[int]) -> Dataset:
-    remaining_idx = torch.arange(len(dataset), dtype=torch.long)
-
-    remaining_idx_mask = torch.full_like(
-        remaining_idx, fill_value=True, dtype=torch.bool
-    )
-
-    remaining_idx_mask[indices] = False
-    remaining_idx = remaining_idx[remaining_idx_mask]
-
-    return Subset(dataset, remaining_idx)
-
-
 def add_next_metrics_evaluation(
     results: LoopResults,
-    model: ModelProto,
+    state: ActiveState,
     test: ALDataset,
     config: LoopConfig,
 ):
+    model: ModelProto = state.get_model()
     metrics = [metric.value(config) for metric in config.metrics]
     metric_names = [metric.name for metric in config.metrics]
 
@@ -105,10 +88,11 @@ def add_next_metrics_evaluation(
 
 def add_pool_probas(
     results: LoopResults,
-    model: ModelProto,
-    pool: Dataset,
+    state: ActiveState,
     config: LoopConfig,
 ):
+    model: ModelProto = state.get_model()
+    pool: Dataset = state.get_pool()
     if config.return_pool_probas:
         probas = model.predict_proba(pool)
         results.pool_probas.append(probas)

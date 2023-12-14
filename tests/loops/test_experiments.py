@@ -30,6 +30,7 @@ from al.sampling.uncert.classification.metrics import (
     simplex_vertex_repel_ratio,
     uncert_maximum_descent_ratio,
 )
+from tests.helpers import random_proba
 
 
 def test_run_experiments_runs_for_selected_number_of_seeds():
@@ -382,12 +383,7 @@ CLASSIFICATION_DATASET = TensorDataset(
     torch.rand((20, 5)),
     torch.tensor([0, 1] * 10, dtype=torch.long),
 )
-REGRESSION_DATASET = TensorDataset(
-    torch.rand((20, 5)),
-    torch.rand(
-        (20,), dtype=torch.double
-    ),  # double becasue of https://github.com/CDonnerer/xgboost-distribution/issues/97
-)
+REGRESSION_DATASET = TensorDataset(torch.rand(20, 5), torch.rand(20))
 
 
 @pytest.mark.parametrize(
@@ -555,39 +551,9 @@ def test_add_uncert_metric_for_max_uncert_proba_adds_metric_for_appropriate_samp
         assert torch.allclose(
             val.metrics["test"],
             metric_func(
-                func=uncert_func,
+                func=uncert_func._call,
                 distribution=torch.tensor(expected_most_uncert_sample).reshape(
                     1, 1, 1, -1
                 ),
             ),
         )
-
-
-@pytest.mark.parametrize(
-    "uncert_func",
-    [
-        entropy,
-        least_confidence,
-        margin,
-    ],
-)
-@pytest.mark.parametrize(
-    "distibution",
-    [
-        torch.eye(10) * 0.9
-        + 0.01,  # we are avoding "pure" points as they are not differenetiable
-        torch.concatenate(
-            [torch.full((8, 4), 1.05 / 8), torch.full((8, 4), 0.95 / 8)], dim=1
-        ),
-        torch.nn.functional.normalize(torch.rand((8, 8)), dim=-1, p=1),
-    ],
-)
-def test_uncert_maximum_descent_ratio_0_is_prior_descent_ratio(
-    uncert_func, distibution
-):
-    prior_descent_values = prior_descent_ratio(uncert_func, distribution=distibution)
-    uncdert_max_values = uncert_maximum_descent_ratio(
-        uncert_func, distribution=distibution
-    )
-
-    assert torch.allclose(prior_descent_values, uncdert_max_values[..., 0], rtol=1e-4)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import enum
 from typing import Any, Callable, NamedTuple, Self, Sequence, TypeAlias
 
@@ -17,7 +18,7 @@ from xgboost_distribution import XGBDistribution
 
 from al.base import ModelProto, RegressionModelProto
 from al.loops.base import ALDataset, FloatTensor, LoopMetricName, LoopResults
-from al.sampling.base import InformativenessProto
+from al.sampling.base import ActiveInMemoryState, InformativenessProto
 from al.sampling.uncert.classification.base import UncertClassificationBase
 
 EXPERIMENT_RESULTS_SERIALIZE_EXTENSION = 9
@@ -344,7 +345,9 @@ def add_uncert_metric_for_probas(
 
             # shape of probas (n_seeds, n_iters, n_samples, n_classes)
             probas = config_results.pool_probas
-            metric_values = metric(func=uncert, distribution=probas).nanmean(dim=2)
+            metric_values = metric(func=uncert._call, distribution=probas).nanmean(
+                dim=2
+            )
             config_results.metrics[metric_name] = metric_values
             progress_bar.update(1)
 
@@ -369,7 +372,8 @@ def add_uncert_metric_for_max_uncert_proba(
             classes_dim = -1
 
             probas = config_results.pool_probas
-            uncert_values = uncert(probas=probas)
+            state = ActiveInMemoryState(probas=probas)
+            uncert_values = uncert(state)
             max_uncert_proba_idx = nanargmax(
                 uncert_values, dim=samples_dim, keepdim=True
             )
@@ -379,7 +383,9 @@ def add_uncert_metric_for_max_uncert_proba(
             selected_proba = selected_proba.unsqueeze(samples_dim)
 
             # there should be only one element in the 2 dim
-            metric_values = metric(func=uncert, distribution=selected_proba)[:, :, 0]
+            metric_values = metric(func=uncert._call, distribution=selected_proba)[
+                :, :, 0
+            ]
             config_results.metrics[metric_name] = metric_values
             progress_bar.update(1)
 
@@ -512,8 +518,13 @@ class XGBDistributionRegressionWrapper(RegressionModelProto):
         return dist_params
 
     def predict(self, data: Dataset) -> FloatTensor:
+        if len(data) == 0:
+            return torch.empty((0,))
         dist_params = self.predict_proba(data)
         return self.get_mode(dist_params)
+
+    def __deepcopy__(self, memo: Any) -> Self:
+        return XGBDistributionRegressionWrapper(copy.deepcopy(self.model, memo))
 
     def _get_params_based_on_dist(self, dist) -> torch.Tensor:
         raise NotImplementedError(

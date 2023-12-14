@@ -5,7 +5,7 @@ from torch import FloatTensor, Tensor
 from torch.utils.data import Dataset
 
 from al.base import ModelProto, RegressionModelProto
-from al.sampling.base import InformativenessProto
+from al.sampling.base import ActiveState, InformativenessProto
 
 
 class UncertRegressionBase(InformativenessProto, abc.ABC):
@@ -14,20 +14,10 @@ class UncertRegressionBase(InformativenessProto, abc.ABC):
         self, distribution_params: Tensor, model: RegressionModelProto
     ) -> FloatTensor:
         ...
-        # TODO: Consider if model should be also passed
 
-    def __call__(
-        self,
-        probas: Tensor = None,
-        model: ModelProto | None = None,
-        dataset: Dataset | None = None,
-    ) -> FloatTensor:
-        if probas is None:
-            assert (
-                model is not None and dataset is not None
-            ), "In case of no probas passed model and dataset have to be defined."
-            probas = model.predict_proba(dataset)
-
+    def __call__(self, state: ActiveState) -> FloatTensor:
+        probas: Tensor = state.get_probas()
+        model: ModelProto = state.get_model()
         if not len(probas):
             return torch.empty(0)
 

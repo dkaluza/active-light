@@ -4,6 +4,7 @@ import torch
 from torch import FloatTensor, Tensor
 
 from al.base import RegressionModelProto
+from al.sampling.kernels import KernelProto, UniformKernel
 
 from .base import UncertRegressionBase
 
@@ -13,23 +14,6 @@ class Variance(UncertRegressionBase):
         self, distribution_params: Tensor, model: RegressionModelProto
     ) -> FloatTensor:
         return model.get_variance(distribution_params=distribution_params)
-
-
-class KernelProto(Protocol):
-    def __call__(
-        self, expected_values: FloatTensor, bandwidth: FloatTensor
-    ) -> FloatTensor:
-        ...
-
-
-class UniformKernel(KernelProto):
-    def __call__(
-        self, expected_values: FloatTensor, bandwidth: FloatTensor
-    ) -> FloatTensor:
-        distances = expected_values.unsqueeze(-1) - expected_values.unsqueeze(0)
-        distances = distances.abs()
-        distances_scaled = distances / bandwidth
-        return 0.5 * torch.sum(distances_scaled <= 1, dim=-1, dtype=torch.double)
 
 
 class EVEAL(UncertRegressionBase):
@@ -50,7 +34,7 @@ class EVEAL(UncertRegressionBase):
     def __init__(
         self,
         epsilon: float = 1.0,
-        use_std_bandwith: bool = True,
+        use_std_bandwith: bool = False,
         kernel: KernelProto = None,
     ) -> None:
         super().__init__()
@@ -82,10 +66,18 @@ class EVEAL(UncertRegressionBase):
             bandwidth *= torch.sqrt(
                 model.get_variance(distribution_params=distribution_params)
             )
+
         kernel_values = self.kernel(
-            expected_values=expected_values, bandwidth=bandwidth
+            distances=self.get_distance_from_expected_values(expected_values),
+            bandwidth=bandwidth,
         )
         return kernel_values / bandwidth / n_samples
+
+    def get_distance_from_expected_values(
+        self, expected_values: FloatTensor
+    ) -> FloatTensor:
+        distances = expected_values.unsqueeze(-1) - expected_values.unsqueeze(0)
+        return distances.abs()
 
 
 variance = Variance()
