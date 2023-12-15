@@ -39,13 +39,11 @@ class MockedInfo(InformativenessProto):
         ),
     ],
 )
-@pytest.mark.parametrize(
-    "pool", [torch.rand(7, 3), torch.zeros((6, 2)), torch.eye(3), torch.ones((0, 3))]
-)
-def test_info_ensemble_returns_n_values(info: InfoEnsemble, pool: torch.Tensor):
-    n_samples = pool.shape[0]
-    state = ActiveInMemoryState(pool=TensorDataset(pool))
-    values = info(state)
+def test_info_ensemble_returns_n_values(
+    info: InfoEnsemble, state_with_pool: ActiveState
+):
+    n_samples = len(state_with_pool.get_pool())
+    values = info(state_with_pool)
     assert values.shape == (n_samples,)
 
 
@@ -56,13 +54,14 @@ def test_info_ensemble_returns_n_values(info: InfoEnsemble, pool: torch.Tensor):
         InfoEnsemble([], aggregation_tactic=ProductAggregation()),
     ],
 )
-@pytest.mark.parametrize("pool", [torch.rand(7, 3), torch.zeros((6, 2)), torch.eye(3)])
 def test_ensemble_returns_constant_without_infos(
-    info: InfoEnsemble, pool: torch.Tensor
+    info: InfoEnsemble, state_with_pool: ActiveState
 ):
-    state = ActiveInMemoryState(pool=TensorDataset(pool))
-    values = info(state)
-    assert len(values.unique()) == 1
+    values = info(state_with_pool)
+
+    assert len(values.unique()) == 1 or (
+        len(state_with_pool.get_pool()) == 0 and values.shape[0] == 0
+    )
 
 
 @pytest.mark.parametrize(

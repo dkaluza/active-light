@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "active-light"
 version = "0.1.0"
-description = "Comprehensive active machine learning library for knowledge acquisition."
+description = "Comprehensive active machine learning library for knowledge acquisition in unannotated environments."
 authors = ["Daniel Kaluza <daniel.kaluza.dk@gmail.com>"]
 readme = "README.md"
 packages = [{ include = "al" }]
@@ -9,8 +9,10 @@ packages = [{ include = "al" }]
 [tool.poetry.dependencies]
 torch = { version = ">=2.1.0" }
 python = ">=3.11, <3.12"
-torchvision = "^0.16.0"
-torchaudio = "^2.1.0"
+torchvision = ">=0.16.0"
+torchaudio = ">=2.1.0"
+faiss-cpu = { version = ">=1.7.4", optional = true }
+faiss-gpu = { version = ">=1.7.4", optional = true }
 
 
 [tool.poetry.group.dev.dependencies]
@@ -58,5 +60,6 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poe.tasks]
 test = "pytest --cov=al"
-install-gpu = "pip3 install  --upgrade --force-reinstall --no-deps torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+install-torch-gpu = "pip3 install  --upgrade --force-reinstall --no-deps torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+install-gpu = "poe install-torch-gpu && poe install-faiss-gpu"
 install-all = "poetry install --with dev,plot,loops,experiments"
