@@ -290,10 +290,12 @@ def create_AL_dataset_from_openml(dataset_id: int) -> CreateALDatasetResult:
             ],
             axis=1,
         )
+    if dataset_Y.dtype == "object":
+        dataset_Y = dataset_Y.astype(pd.CategoricalDtype)
 
     dataset_Y = (
         dataset_Y.cat.codes.to_numpy(dtype=np.int64)
-        if dataset_Y.dtype == pd.CategoricalDtype
+        if dataset_Y.dtype == "category"
         else dataset_Y.to_numpy()
     )
 
@@ -398,6 +400,28 @@ def nanargmax(tensor, dim=None, keepdim=False):
     min_value = torch.finfo(tensor.dtype).min
     indices = tensor.nan_to_num(min_value).max(dim=dim, keepdim=keepdim).indices
     return indices
+
+
+class ScikitWrapper(ModelProto):
+    def __init__(self, model) -> None:
+        super().__init__()
+        self.model = model
+
+    def fit(self, train: Dataset):
+        train = ALDataset(train)
+        features = train.features
+        targets = train.targets
+
+        features = features.numpy(force=True)
+        targets = targets.numpy(force=True)
+        self.model.fit(features, targets)
+
+    def predict_proba(self, data: Dataset) -> torch.FloatTensor:
+        data = ALDataset(data)
+        features = data.features
+
+        features = features.numpy(force=True)
+        return torch.tensor(self.model.predict_proba(features))
 
 
 class XGBWrapper(ModelProto):

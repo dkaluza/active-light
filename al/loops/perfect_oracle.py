@@ -91,8 +91,5 @@ def add_pool_probas(
     state: ActiveState,
     config: LoopConfig,
 ):
-    model: ModelProto = state.get_model()
-    pool: Dataset = state.get_pool()
     if config.return_pool_probas:
-        probas = model.predict_proba(pool)
-        results.pool_probas.append(probas)
+        results.pool_probas.append(state.get_probas())

@@ -8,18 +8,30 @@ from al.sampling.base import ActiveState, InformativenessProto
 
 
 class KNearestNeighborRepr(InformativenessProto):
+    CACHE_KEY = "KNN_pool_index"
+
     def __init__(self, k=25, batch_size=32) -> None:
         super().__init__()
         self.k = k
         self.batch_size = batch_size
 
     def __call__(self, state: ActiveState) -> torch.FloatTensor:
-        index = self.get_index(state)
+        index = self._get_index_from_cache(state)
+        if index is None:
+            index = self.build_index(state)
+            self._save_index_in_cache(state, index)
+
         distances = self.get_neighbor_distances(index, state)
         distances = distances.nan_to_num(1e6)
         return 1 / (1 + distances.mean(dim=1))
 
-    def get_index(self, state: ActiveState) -> faiss.Index:
+    def _get_index_from_cache(self, state: ActiveState) -> faiss.Index | None:
+        return state.get_from_cache(self.CACHE_KEY)
+
+    def _save_index_in_cache(self, state: ActiveState, index: faiss.Index):
+        state.save_in_cache(self.CACHE_KEY, index)
+
+    def build_index(self, state: ActiveState) -> faiss.Index:
         pool = []
         for batch in self._iterate_over_pool(state=state):
             assert isinstance(batch, list)
@@ -62,3 +74,6 @@ class KNearestNeighborRepr(InformativenessProto):
         pool = state.get_pool()
         loader = DataLoader(pool, batch_size=self.batch_size, shuffle=False)
         yield from loader
+
+
+k_nearest_neighbor_repr = KNearestNeighborRepr()

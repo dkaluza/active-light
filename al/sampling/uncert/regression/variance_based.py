@@ -76,7 +76,9 @@ class EVEAL(UncertRegressionBase):
     def get_distance_from_expected_values(
         self, expected_values: FloatTensor
     ) -> FloatTensor:
-        distances = expected_values.unsqueeze(-1) - expected_values.unsqueeze(0)
+        # TODO: use batch based implementation as in classification?
+        # mabe we can use common implementation parts?
+        distances = expected_values.unsqueeze(1) - expected_values.unsqueeze(0)
         return distances.abs()
 
 

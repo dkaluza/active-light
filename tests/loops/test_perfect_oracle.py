@@ -49,7 +49,12 @@ POOL_DATASET = ALDataset(
         torch.zeros(N_SAMPLES),
     )
 )
-INITIAL_DATASET = ALDataset(TensorDataset(torch.empty(0, 1)))
+INITIAL_DATASET = ALDataset(
+    TensorDataset(
+        torch.empty(0, 1),
+        torch.zeros(0),
+    )
+)
 
 
 def test_active_learning_loop_chooses_most_informative_sample():

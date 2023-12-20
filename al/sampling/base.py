@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Protocol, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol, Sequence
 
 import torch
 from torch.utils.data import ConcatDataset, Dataset, Subset
@@ -19,6 +19,18 @@ class ActiveState(Protocol):
     """
 
     def has_probas(self) -> bool:
+        """Indicates if probabilities for the samples pool estimated with the model are
+        available.
+
+        Warning:  Even if this method returns False, it might be possible to retrieve
+        probabilities with `get_probas` method, but it will require additional computation,
+        e.g. prediction with machine learning model.
+
+        Returns
+        -------
+        bool
+            Indicator if probabilities are available for retrieval without additional computation.
+        """
         ...
 
     def get_probas(self) -> torch.Tensor:
@@ -37,13 +49,21 @@ class ActiveState(Protocol):
         # TODO: make pool data without labels to make sure none of methods access them
         ...
 
+    def save_in_cache(self, key: str, value: Any):
+        ...
+
+    def get_from_cache(self, keys: str) -> Any | None:
+        ...
+
 
 @dataclass(kw_only=True)
 class ActiveInMemoryState(ActiveState):
-    probas: torch.Tensor | None = None
-    model: ModelProto | None = None
-    pool: Dataset | None = None
-    training_data: Dataset | None = None
+    probas: torch.Tensor | None = field(default=None)
+    model: ModelProto | None = field(default=None)
+    pool: Dataset | None = field(default=None)
+    training_data: Dataset | None = field(default=None)
+
+    cache: dict = field(default_factory=dict)
 
     def has_probas(self) -> bool:
         return self.probas is not None
@@ -72,6 +92,7 @@ class ActiveInMemoryState(ActiveState):
 
     def select_samples(self, pool_idx: Sequence[int], remove_from_pool: bool):
         assert self.training_data is not None and self.pool is not None
+        # TODO allow more complex scenarios
         selected_samples = Subset(self.pool, pool_idx)
         if remove_from_pool:
             self.pool = remove_indices_from_dataset(self.pool, pool_idx)
@@ -81,6 +102,12 @@ class ActiveInMemoryState(ActiveState):
         assert self.model is not None
         self.probas = None
         self.model.fit(train=self.training_data)
+
+    def save_in_cache(self, key: str, value: Any):
+        self.cache[key] = value
+
+    def get_from_cache(self, key: str) -> Any | None:
+        return self.cache.get(key, None)
 
 
 def remove_indices_from_dataset(dataset: Dataset, indices: list[int]) -> Dataset:

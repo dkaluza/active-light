@@ -75,6 +75,7 @@ class InfoEnsemble(InformativenessProto):
 
         return results
 
+    @property
     def __name__(self):
         return "Ensemble" + "_".join(
             [

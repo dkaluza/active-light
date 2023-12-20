@@ -7,7 +7,7 @@ from typing import Annotated, Any, Iterable, Self, Sequence, TypeAlias
 import torch
 from pydantic import BaseModel, Field, GetPydanticSchema
 from torch._tensor import Tensor
-from torch.utils.data import DataLoader, Dataset, IterableDataset, TensorDataset
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, Subset, TensorDataset
 from torcheval import metrics
 from torcheval.metrics.metric import Metric
 
@@ -140,18 +140,105 @@ class ALDatasetWithoutTargets(Dataset, metaclass=TransparentWrapperMeta):
         return self._features
 
     def _initialize_features(self):
-        features = []
-        if isinstance(self.dataset, TensorDataset):
-            self._features = self.dataset.tensors[0].float()
-        else:
-            for batch in self._iterate_over_dataset():
-                feature_batch = batch[0]
-                features.append(feature_batch)
+        optimized_initialize_succeeded = (
+            self._optimized_initialize_features_for_tensor_types()
+        )
 
-            if len(features) > 0:
-                self._features = torch.concat(features).float()
-            else:
-                self._features = torch.empty((0, 1), dtype=torch.float)
+        if not optimized_initialize_succeeded:
+            self._initialize_features_by_iteration()
+
+    def _optimized_initialize_features_for_tensor_types(self):
+        features = self._optimized_retrieve_for_tensor_types(
+            considered_dataset=self.dataset,
+            index_to_retrieve=0,
+            attr_to_retrieve="features",
+            required_class_to_select_by_attr=ALDatasetWithoutTargets,
+        )
+        if features is not None:
+            self._features = features
+            return True
+
+        return False
+
+    def _optimized_retrieve_for_tensor_types(
+        self,
+        considered_dataset: Dataset,
+        index_to_retrieve: int,
+        attr_to_retrieve: str,
+        required_class_to_select_by_attr: type,
+    ) -> torch.Tensor | None:
+        """A set o optimizations to avoid reitaration through tensor based dataset mutliple times
+        in active experiments in situations in which models assume whole training set/pool
+        loaded in memory.
+
+        This method computes common dataset operations like concat and subset directly on
+        underlying tensors, therefore avoiding unnecessary reiterations through set if possible.
+
+        In case of success retrieved tensor is returned after common dataset operations applied.
+
+        Parameters
+        ----------
+        considered_dataset: Dataset
+            Dataset from desired tensor representation should be retrieved.
+        index_to_retrieve : int
+            Index to retrieve from TensorDataset, usually 0 indicates features and 1 targets.
+        attr_to_retrieve : str
+            Attribute via which tensor will be retrieved if `required_class_to_select_by_attr`
+            is encountered.
+        required_class_to_select_by_attr : type
+            Class for which `attr_to_retrieve` will be accessed to retrieve tensor from attribute.
+            Usually subclass of this class is used.
+        Returns
+        -------
+        torch.Tensor | None
+            Retrieved tensor or None if retrival failed.
+        """
+        if isinstance(considered_dataset, required_class_to_select_by_attr):
+            return getattr(considered_dataset, attr_to_retrieve)
+        elif isinstance(considered_dataset, TensorDataset):
+            return considered_dataset.tensors[index_to_retrieve]
+        elif isinstance(considered_dataset, Subset):
+            indices = considered_dataset.indices
+            values = self._optimized_retrieve_for_tensor_types(
+                considered_dataset=considered_dataset.dataset,
+                index_to_retrieve=index_to_retrieve,
+                attr_to_retrieve=attr_to_retrieve,
+                required_class_to_select_by_attr=required_class_to_select_by_attr,
+            )
+            if values is not None:
+                return values[indices]
+        elif isinstance(considered_dataset, ConcatDataset):
+            gathered_values = []
+            for dataset in considered_dataset.datasets:
+                dataset_values = self._optimized_retrieve_for_tensor_types(
+                    considered_dataset=dataset,
+                    index_to_retrieve=index_to_retrieve,
+                    attr_to_retrieve=attr_to_retrieve,
+                    required_class_to_select_by_attr=required_class_to_select_by_attr,
+                )
+                if dataset_values is None:
+                    return None
+                gathered_values.append(dataset_values)
+
+            return torch.concat(gathered_values)
+
+        return None
+
+    def _initialize_features_by_iteration(self):
+        values = self._retrieve_by_iteration(index_to_retrieve=0)
+        self._features = values
+
+    def _retrieve_by_iteration(self, index_to_retrieve):
+        values = []
+        for batch in self._iterate_over_dataset():
+            values_batch = batch[index_to_retrieve]
+            values.append(values_batch)
+
+        if len(values) > 0:
+            values = torch.concat(values)
+        else:
+            values = torch.empty((0, 1))
+        return values
 
     def __hash__(self) -> int:
         return self.features.__hash__()
@@ -193,18 +280,25 @@ class ALDataset(ALDatasetWithoutTargets):
         return self._targets
 
     def _initialize_targets(self):
-        targets = []
-        if isinstance(self.dataset, TensorDataset):
-            self._targets = self.dataset.tensors[1].to(dtype=self._targets_dtype)
-        else:
-            for batch in self._iterate_over_dataset():
-                target_batch = batch[1]
-                targets.append(target_batch)
+        if not self._optimized_initialize_targets_for_tensor_types():
+            self._initialize_targets_by_iteration()
 
-            if len(targets) > 0:
-                self._targets = torch.concat(targets).to(dtype=self._targets_dtype)
-            else:
-                self._targets = torch.empty((0,), dtype=self._targets_dtype)
+    def _optimized_initialize_targets_for_tensor_types(self):
+        targets = self._optimized_retrieve_for_tensor_types(
+            considered_dataset=self.dataset,
+            index_to_retrieve=1,
+            attr_to_retrieve="targets",
+            required_class_to_select_by_attr=ALDataset,
+        ).to(self._targets_dtype)
+        if targets is not None:
+            self._targets = targets
+            return True
+
+        return False
+
+    def _initialize_targets_by_iteration(self):
+        values = self._retrieve_by_iteration(index_to_retrieve=1)
+        self._targets = values.to(self._targets_dtype)
 
     @property
     def n_classes(self):
