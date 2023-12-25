@@ -4,6 +4,12 @@ import torch
 from torch.utils.data import Dataset
 
 
+def get_default_torch_device() -> torch.device:
+    return torch.empty(
+        1
+    ).device  # a trick to get default device since appropriate helper does not exist
+
+
 class ModelProto(Protocol):
     def fit(self, train: Dataset):
         ...

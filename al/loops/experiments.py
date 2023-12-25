@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 from xgboost import XGBModel
 from xgboost_distribution import XGBDistribution
 
-from al.base import ModelProto, RegressionModelProto
+from al.base import ModelProto, RegressionModelProto, get_default_torch_device
 from al.loops.base import ALDataset, FloatTensor, LoopMetricName, LoopResults
 from al.sampling.base import ActiveInMemoryState, InformativenessProto
 from al.sampling.uncert.classification.base import UncertClassificationBase
@@ -217,9 +217,7 @@ def run_experiment(
     save_path: str | None = None,
     **loop_kwargs,
 ) -> ExperimentResults:
-    device = torch.empty(
-        1
-    ).device  # a trick to get default device since appropriate helper does not exist
+    device = get_default_torch_device()
     generator = torch.Generator(device=device).manual_seed(seed)
 
     if isinstance(test_frac, float):

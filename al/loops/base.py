@@ -11,6 +11,8 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, Subset, TensorD
 from torcheval import metrics
 from torcheval.metrics.metric import Metric
 
+from al.base import get_default_torch_device
+
 
 class MetricWrapper(Metric[torch.Tensor]):
     def __init__(
@@ -20,6 +22,8 @@ class MetricWrapper(Metric[torch.Tensor]):
         is_distribution_based: bool,
         device: torch.device | None = None,
     ) -> None:
+        if device is None:
+            device = get_default_torch_device()
         super().__init__(device=device)
         self.metric = metric.to(device=device)
         self.is_distribution_based = is_distribution_based

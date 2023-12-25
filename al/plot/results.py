@@ -16,8 +16,10 @@ def plot_metric(
         metric_values = config_results.metrics[metric_name]
         if metric_slice is not None:
             metric_values = metric_values[metric_slice]
-        metric_avg_over_seeds = metric_values.mean(dim=0)
-        iterations = torch.arange(metric_avg_over_seeds.shape[0])
+        metric_avg_over_seeds = metric_values.mean(dim=0).cpu()
+        iterations = torch.arange(
+            metric_avg_over_seeds.shape[0], device=torch.device("cpu")
+        )
 
         plt.plot(iterations, metric_avg_over_seeds, label=config_name)
 

@@ -11,9 +11,12 @@ torch = { version = ">=2.1.0" }
 python = ">=3.11, <3.12"
 torchvision = ">=0.16.0"
 torchaudio = ">=2.1.0"
-faiss-cpu = { version = ">=1.7.4", optional = true }
-faiss-gpu = { version = ">=1.7.4", optional = true }
+faiss-cpu = { version = ">=1.7.2", optional = true }
+faiss-gpu = { version = ">=1.7.2", optional = true }
 
+[tool.poetry.extras]
+faiss-cpu = ["faiss-cpu"]
+faiss-gpu = ["faiss-gpu"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"
@@ -61,5 +64,6 @@ build-backend = "poetry.core.masonry.api"
 [tool.poe.tasks]
 test = "pytest --cov=al"
 install-torch-gpu = "pip3 install  --upgrade --force-reinstall --no-deps torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
-install-gpu = "poe install-torch-gpu && poe install-faiss-gpu"
+install-faiss-gpu = "conda install -c conda-forge faiss-gpu"
+install-gpu = ["install-faiss-gpu", "install-torch-gpu"]
 install-all = "poetry install --with dev,plot,loops,experiments"
