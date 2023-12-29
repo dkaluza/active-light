@@ -10,6 +10,7 @@ import ormsgpack as msgpack
 import pandas as pd
 import sklearn
 import torch
+import torch.types
 from pydantic import BaseModel
 from torch.utils.data import Dataset, TensorDataset, random_split
 from tqdm.auto import tqdm
@@ -273,7 +274,9 @@ class CreateALDatasetResult(NamedTuple):
     attr_names: list[str]
 
 
-def create_AL_dataset_from_openml(dataset_id: int) -> CreateALDatasetResult:
+def create_AL_dataset_from_openml(
+    dataset_id: int, targets_dtype: torch.types._dtype | None = None
+) -> CreateALDatasetResult:
     dataset_handle = openml.datasets.get_dataset(dataset_id, download_data=True)
     dataset_X, dataset_Y, cat_features, attr_names = dataset_handle.get_data(
         dataset_format="dataframe", target=dataset_handle.default_target_attribute
@@ -297,9 +300,8 @@ def create_AL_dataset_from_openml(dataset_id: int) -> CreateALDatasetResult:
         else dataset_Y.to_numpy()
     )
 
-    dataset_X, dataset_Y = torch.tensor(
-        dataset_X.to_numpy(dtype=np.float64)
-    ), torch.tensor(dataset_Y)
+    dataset_X = torch.tensor(dataset_X.to_numpy(dtype=np.float64))
+    dataset_Y = torch.tensor(dataset_Y, dtype=targets_dtype)
 
     dataset = ALDataset(TensorDataset(dataset_X, dataset_Y))
     return CreateALDatasetResult(dataset, cat_features, attr_names)
@@ -321,7 +323,7 @@ def add_uncert_metric_for_probas(
     results : ExperimentResults
         Results for which uncertainty metric should be computet and added to metric values.
         They should have non empty `pool_proba`.
-    uncerts : Sequence[UncertBase]
+    uncerts : Sequence[UncertClassificationBase]
         Sequence of uncertainty functions that should be used in metric computation.
         They will be matched with results keys using `uncert.__name__`
     metric : Callable[..., torch.FloatTensor]
@@ -486,6 +488,13 @@ class NClassesGuaranteeWrapper(ModelProto):
         if self.targets_encoder is not None:
             probas = torch.zeros((len(data), self.n_classes), dtype=torch.float)
             trained_on_classes = torch.tensor(self.targets_encoder.classes_)
+
+            # in case when only one class occurs in the training set, predict probas still
+            # usually returns 2 classes, therefore in such case we are taking only possitive
+            # class occurance prediction to match the shape
+            if len(trained_on_classes) == 1 and predicted_probas.shape[1] == 2:
+                predicted_probas = predicted_probas[:, 1].unsqueeze(dim=-1)
+
             probas[:, trained_on_classes] = predicted_probas
         else:
             probas = predicted_probas

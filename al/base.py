@@ -3,6 +3,8 @@ from typing import Protocol, runtime_checkable
 import torch
 from torch.utils.data import Dataset
 
+CLASSES_DIM = -1
+
 
 def get_default_torch_device() -> torch.device:
     return torch.empty(
@@ -10,6 +12,7 @@ def get_default_torch_device() -> torch.device:
     ).device  # a trick to get default device since appropriate helper does not exist
 
 
+@runtime_checkable
 class ModelProto(Protocol):
     def fit(self, train: Dataset):
         ...

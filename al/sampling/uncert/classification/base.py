@@ -2,12 +2,9 @@
 import abc
 
 import torch
-from torch.utils.data import Dataset
 
-from al.base import ModelProto
+from al.base import CLASSES_DIM
 from al.sampling.base import ActiveState, InformativenessProto
-
-CLASSES_DIM = -1
 
 
 class UncertClassificationBase(InformativenessProto, abc.ABC):

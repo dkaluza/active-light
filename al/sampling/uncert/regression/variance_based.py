@@ -70,7 +70,7 @@ class EVEAL(UncertRegressionBase):
         kernel_values = self.kernel(
             distances=self.get_distance_from_expected_values(expected_values),
             bandwidth=bandwidth,
-        )
+        ).sum(dim=-1)
         return kernel_values / bandwidth / n_samples
 
     def get_distance_from_expected_values(

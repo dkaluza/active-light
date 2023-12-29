@@ -10,6 +10,7 @@ from al.loops.experiments import ExperimentResults
 def plot_metric(
     experiment_results: ExperimentResults,
     metric_name: LoopMetricName,
+    add_mean_to_legened: bool = False,
     metric_slice: slice = None,
 ):
     for config_name, config_results in experiment_results.res.items():
@@ -21,6 +22,10 @@ def plot_metric(
             metric_avg_over_seeds.shape[0], device=torch.device("cpu")
         )
 
-        plt.plot(iterations, metric_avg_over_seeds, label=config_name)
+        label = config_name
+        if add_mean_to_legened:
+            mean_accross_iters = metric_values.mean(dim=-1)
+            label += f" ({mean_accross_iters.mean() : .3f} $\pm$ {torch.std(mean_accross_iters) : .4f})"
+        plt.plot(iterations, metric_avg_over_seeds, label=label)
 
     plt.legend()

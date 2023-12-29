@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import functools
+import warnings
 from typing import Annotated, Any, Iterable, Self, Sequence, TypeAlias
 
 import torch
@@ -121,6 +122,7 @@ class LoopConfig(BaseModel):
 # performance because of cache misses
 class TransparentWrapperMeta(type):
     def __call__(cls, *args, **kwargs):
+        # TODO: Warn about other args not used
         if isinstance(args[0], cls):
             return args[0]
 

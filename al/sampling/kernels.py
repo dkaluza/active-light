@@ -11,8 +11,13 @@ class KernelProto(Protocol):
 
 class UniformKernel(KernelProto):
     def __call__(self, distances: FloatTensor, bandwidth: FloatTensor) -> FloatTensor:
-        distances_scaled = distances / bandwidth
-        return 0.5 * torch.sum(distances_scaled <= 1, dim=-1, dtype=torch.double)
+        return 0.5 * (distances <= bandwidth)
+
+
+class GaussianKernel(KernelProto):
+    def __call__(self, distances: FloatTensor, bandwidth: FloatTensor) -> FloatTensor:
+        gauss_std = distances / bandwidth
+        return torch.exp(-0.5 * gauss_std**2) / (torch.pi * 2) ** 0.5
 
 
 def get_bandwidth_by_dist_quantile(

@@ -8,13 +8,14 @@ The functions return a tensor of shape `(n_samples,)`, where higher values indic
 
 import torch
 
+from al.distances import entropy as dist_entropy
+
 from .base import CLASSES_DIM, UncertClassificationBase
 
 
 class Entropy(UncertClassificationBase):
     def _call(self, probas: torch.FloatTensor) -> torch.FloatTensor:
-        uncert = torch.where(probas == 0, 0, probas * torch.log2(probas))
-        return -torch.sum(uncert, dim=CLASSES_DIM)
+        return dist_entropy(probas=probas, dim=CLASSES_DIM)
 
 
 class Margin(UncertClassificationBase):

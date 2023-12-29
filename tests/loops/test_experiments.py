@@ -23,7 +23,7 @@ from al.loops.experiments import (
     add_uncert_metric_for_probas,
 )
 from al.loops.perfect_oracle import active_learning_loop
-from al.sampling.qbc import ambiguity_qbc
+from al.sampling.qbc import ambiguity
 from al.sampling.uncert import entropy, eveal, least_confidence, margin, variance
 from al.sampling.uncert.classification.metrics import (
     monotonicity_from_vertex,
@@ -406,7 +406,7 @@ REGRESSION_DATASET = TensorDataset(torch.rand(20, 5), torch.rand(20))
         (
             LoopConfig(metrics=[LoopMetric.R2]),
             REGRESSION_MODEL,
-            [variance, eveal, ambiguity_qbc],
+            [variance, eveal, ambiguity],
             REGRESSION_DATASET,
         ),
     ],
