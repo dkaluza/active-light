@@ -3,8 +3,10 @@ import math
 import torch
 from torch import FloatTensor
 from torch.utils.data import DataLoader, TensorDataset
+from torchaudio.functional import convolve
 
 from al.base import RegressionModelProto
+from al.binning import approximate_point_densities_from_binned_density, linear_binning
 from al.distances import Distance, JensenShannonDistance, L1Distance
 from al.sampling.base import ActiveState, InformativenessProto
 from al.sampling.kernels import KernelProto, get_bandwidth_by_dist_quantile
@@ -75,6 +77,61 @@ class PrDensity(InformativenessProto):
     @property
     def __name__(self):
         return "ProbaDensity" + self.kernel.__class__.__name__ + self.distance.__name__
+
+
+class PrDensityApprox(PrDensity):
+    def get_kernel_values_from_probas(
+        self, probas: FloatTensor, bandwidth: float
+    ) -> FloatTensor:
+        binning_results = linear_binning(points=probas, distance=self.distance)
+        grid_weights = binning_results.grid_weights
+        step_sizes = binning_results.step_sizes
+
+        kernel_support_distance = self.kernel.support * bandwidth
+
+        # note: this approximation might be inaccurate for distances like Jensen-Shannon
+        n_grid_sizes_in_kernel_support_distance = torch.floor(
+            kernel_support_distance / step_sizes.squeeze()
+        )
+        n_grid_sizes_to_check = torch.minimum(
+            n_grid_sizes_in_kernel_support_distance, grid_weights.shape
+        )
+
+        grid_coords_in_kernel_sup_distance = torch.cartesian_prod(
+            *[
+                torch.linspace(
+                    -step_size * num_of_steps,
+                    step_size * num_of_steps,
+                    steps=2 * num_of_steps + 1,
+                )  # 0 should be included as a result of steps equal to 2*num_of_steps+1
+                for num_of_steps, step_size in zip(n_grid_sizes_to_check, step_sizes)
+            ]
+        )
+
+        # note: this might cause large errors for Jensen-Shannon distance
+        distances_to_grid_coords = self.distance.pairwise(
+            torch.zeros_like(
+                grid_coords_in_kernel_sup_distance,
+            ),
+            grid_coords_in_kernel_sup_distance,
+        )
+        kernel_values_for_distances = self.kernel(
+            distances=distances_to_grid_coords, bandwidth=bandwidth
+        )
+
+        grid_densities = convolve(
+            grid_weights, kernel_values_for_distances, padding="same"
+        )
+
+        points_densities = approximate_point_densities_from_binned_density(
+            grid_densities=grid_densities,
+            points=probas,
+            distance=self.distance,
+            min_coords=binning_results.min_coords,
+            step_sizes=step_sizes,
+        )
+
+        return points_densities
 
 
 class PrDensityRegr(PrDensity):
