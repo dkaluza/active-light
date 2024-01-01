@@ -2,7 +2,8 @@ import pytest
 import torch
 from torch.utils.data import TensorDataset
 
-from al.sampling.base import ActiveInMemoryState, ActiveState, InformativenessProto
+from al.base import ActiveInMemoryState, ActiveState
+from al.sampling.base import InformativenessProto
 from al.sampling.combination import InfoEnsemble, ProductAggregation, SumAggregation
 
 

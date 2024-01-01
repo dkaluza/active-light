@@ -17,9 +17,17 @@ from tqdm.auto import tqdm
 from xgboost import XGBModel
 from xgboost_distribution import XGBDistribution
 
-from al.base import ModelProto, RegressionModelProto, get_default_torch_device
+from al.base import (
+    ActiveInMemoryState,
+    ActiveState,
+    ClassificationModelUsingProbaPredictTactic,
+    ModelProto,
+    PredictTactic,
+    RegressionModelProto,
+    get_default_torch_device,
+)
 from al.loops.base import ALDataset, FloatTensor, LoopMetricName, LoopResults
-from al.sampling.base import ActiveInMemoryState, InformativenessProto
+from al.sampling.base import InformativenessProto
 from al.sampling.uncert.classification.base import UncertClassificationBase
 
 EXPERIMENT_RESULTS_SERIALIZE_EXTENSION = 9
@@ -292,7 +300,7 @@ def create_AL_dataset_from_openml(
             axis=1,
         )
     if dataset_Y.dtype == "object":
-        dataset_Y = dataset_Y.astype(pd.CategoricalDtype)
+        dataset_Y = dataset_Y.astype("category")
 
     dataset_Y = (
         dataset_Y.cat.codes.to_numpy(dtype=np.int64)
@@ -408,6 +416,7 @@ class ScikitWrapper(ModelProto):
         self.model = model
 
     def fit(self, train: Dataset):
+        super().fit(train)
         train = ALDataset(train)
         features = train.features
         targets = train.targets
@@ -424,12 +433,15 @@ class ScikitWrapper(ModelProto):
         return torch.tensor(self.model.predict_proba(features))
 
 
-class XGBWrapper(ModelProto):
-    def __init__(self, model: XGBModel) -> None:
-        super().__init__()
+class XGBWrapper(ClassificationModelUsingProbaPredictTactic):
+    def __init__(
+        self, model: XGBModel, predict_tactic: PredictTactic | None = None
+    ) -> None:
+        super().__init__(predict_tactic=predict_tactic)
         self.model = model
 
     def fit(self, train: Dataset):
+        super().fit(train=train)
         train = ALDataset(train)
         features = train.features
         targets = train.targets
@@ -441,6 +453,12 @@ class XGBWrapper(ModelProto):
         else:
             features = features.numpy(force=True)
             targets = targets.numpy(force=True)
+
+        # we are hacking num_class becasue of the misbehavior of xgboost when num_classes does not match number of classes found in data
+        num_class = train.n_classes
+        if self.model.objective == "multi:softprob":
+            self.model.set_params(num_class=num_class)
+
         self.model.fit(features, targets)
 
     def predict_proba(self, data: Dataset) -> torch.FloatTensor:
@@ -453,10 +471,12 @@ class XGBWrapper(ModelProto):
             features = cupy.asarray(features)
         else:
             features = features.numpy(force=True)
-        return torch.tensor(self.model.predict_proba(features))
+        probas = self.model.predict_proba(features)
+
+        return torch.tensor(probas)
 
 
-class NClassesGuaranteeWrapper(ModelProto):
+class NClassesGuaranteeWrapper(ClassificationModelUsingProbaPredictTactic):
     model: ModelProto
     targets_encoder: None | sklearn.preprocessing.LabelEncoder
 
@@ -467,14 +487,15 @@ class NClassesGuaranteeWrapper(ModelProto):
         self.targets_encoder = None
 
     def fit(self, train: Dataset):
+        super().fit(train)
         train = ALDataset(train)
         features = train.features
-        targets = train.targets
+        targets: torch.Tensor = train.targets
         train_n_classes = train.n_classes
 
         if train_n_classes != self.n_classes:
             self.targets_encoder = sklearn.preprocessing.LabelEncoder()
-            targets = self.targets_encoder.fit_transform(targets)
+            targets = self.targets_encoder.fit_transform(targets.cpu().numpy())
             targets = torch.tensor(targets)
             train = TensorDataset(features, targets)
         else:
@@ -484,6 +505,7 @@ class NClassesGuaranteeWrapper(ModelProto):
 
     def predict_proba(self, data: Dataset) -> torch.FloatTensor:
         data = ALDataset(data)
+
         predicted_probas = self.model.predict_proba(data)
         if self.targets_encoder is not None:
             probas = torch.zeros((len(data), self.n_classes), dtype=torch.float)
@@ -500,6 +522,16 @@ class NClassesGuaranteeWrapper(ModelProto):
             probas = predicted_probas
 
         return probas
+
+    def predict(self, data: Dataset) -> torch.FloatTensor:
+        return self.model.predict(data)
+
+    def initialize_tactic(self, state: ActiveState):
+        # quite ugly workaround as if this model is instance of ClassificationModelUsingProbaPredictTactic
+        # depends from the encapsualted model itself
+        # maybe it can be done better via metaclass?
+        if isinstance(self.model, ClassificationModelUsingProbaPredictTactic):
+            self.model.initialize_tactic(state)
 
 
 class RegressionDist(enum.Enum):
@@ -533,6 +565,7 @@ class XGBDistributionRegressionWrapper(RegressionModelProto):
         self.model = model
 
     def fit(self, train: Dataset):
+        super().fit(train)
         train = ALDataset(train)
         features = train.features
         targets = train.targets

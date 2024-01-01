@@ -6,9 +6,14 @@ from typing import Protocol
 import torch
 from torch.utils.data import Dataset, Subset, random_split
 
-from al.base import ModelProto, RegressionModelProto
+from al.base import (
+    ActiveState,
+    ModelProto,
+    RegressionModelProto,
+    get_default_torch_device,
+)
 from al.distances import jensen_shannon_divergence
-from al.sampling.base import ActiveState, InformativenessProto
+from al.sampling.base import InformativenessProto
 
 
 class DataDistributionTactic(Protocol):
@@ -56,7 +61,7 @@ class QueryByCommitte(InformativenessProto, metaclass=abc.ABCMeta):
         super().__init__()
         self.n_models = n_models
         self.data_distribution_tactic = data_distribution_tactic
-        self.generator = torch.Generator()
+        self.generator = torch.Generator(device=get_default_torch_device())
         if seed is not None:
             self.generator.manual_seed(seed)
 

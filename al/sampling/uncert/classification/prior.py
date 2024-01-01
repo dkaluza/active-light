@@ -1,12 +1,10 @@
 import torch
 from torch import FloatTensor
 
+from al.prior import get_prior_from_model_perspective
+
 from .base import CLASSES_DIM, UncertClassificationBase
 from .classical import entropy
-
-
-def get_prior_from_model_perspective(probas: FloatTensor) -> FloatTensor:
-    return probas.mean(dim=0)
 
 
 class OffCenteredEntropy(UncertClassificationBase):

@@ -4,9 +4,9 @@ import torch
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
-from al.base import ModelProto
+from al.base import ActiveInMemoryState, ActiveState, ModelProto
 from al.loops.base import ALDataset, LoopConfig, LoopResults
-from al.sampling.base import ActiveInMemoryState, ActiveState, InformativenessProto
+from al.sampling.base import InformativenessProto
 
 
 def active_learning_loop(

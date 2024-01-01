@@ -1,6 +1,6 @@
 import torch
 
-from al.sampling.base import ActiveInMemoryState, ActiveState
+from al.base import ActiveInMemoryState, ActiveState
 from al.sampling.uncert.classification.base import CLASSES_DIM
 
 

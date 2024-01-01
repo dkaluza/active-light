@@ -1,11 +1,13 @@
 import functools
+import logging
 from itertools import chain, combinations
-from logging import warning
 from typing import Callable, NamedTuple
 
 import torch
 
 from al.distances import Distance
+
+logger = logging.getLogger(__name__)
 
 
 class BinningResult(NamedTuple):
@@ -18,7 +20,7 @@ class BinningResult(NamedTuple):
 def linear_binning(
     points: torch.FloatTensor,
     distance: Distance,
-    n_grid_points=1024,
+    n_grid_points=10024,
     min_coords: torch.FloatTensor | None = None,
     max_coords: torch.FloatTensor | None = None,
 ) -> BinningResult:
@@ -48,17 +50,18 @@ def linear_binning(
     n_dims = points.shape[-1]
     n_points_per_dim = int(n_grid_points ** (1 / n_grid_points))
     if n_points_per_dim < 10:
-        warning("Low number of points for each dimension %d", n_points_per_dim)
+        logger.warning("Low number of points for each dimension: %d", n_points_per_dim)
 
     if min_coords is None:
-        min_coords = points.min(dim=0)
+        min_coords = points.min(dim=0).values
     if max_coords is None:
-        max_coords = points.max(dim=0)
+        max_coords = points.max(dim=0).values
 
     # we divide by n_points_per_dim - 1 because both start and end should be included in the n_points
     step_sizes = (max_coords - min_coords) / (n_points_per_dim - 1)
 
-    grid_shape = [n_points_per_dim] * n_dims
+    # shape is n_points + 1 to make the max also indexable
+    grid_shape = [n_points_per_dim + 1] * n_dims
     grid_weights = torch.zeros(grid_shape)
 
     # mesh grid cannot be equidistant in arbitrary metric, therefore it is equidistant in l1,
@@ -76,7 +79,6 @@ def linear_binning(
         step_sizes=step_sizes,
         func=add_to_weights,
     )
-    print(grid_weights)
     return BinningResult(
         grid_weights=grid_weights,
         min_coords=min_coords,
@@ -86,9 +88,9 @@ def linear_binning(
 
 
 def _add_weights_indexing_by_bounds(grid_weights, shifted_bounds, weights_for_bounds):
-    grid_weights[
-        *torch.split(shifted_bounds, split_size_or_sections=1, dim=1)
-    ] += weights_for_bounds
+    indexer = torch.split(shifted_bounds, split_size_or_sections=1, dim=1)
+    indexer = [index.squeeze() for index in indexer]
+    grid_weights[*indexer] += weights_for_bounds
 
 
 def _apply_function_for_weights_for_bounds(
@@ -96,10 +98,12 @@ def _apply_function_for_weights_for_bounds(
     distance: Distance,
     min_coords: torch.FloatTensor,
     step_sizes: torch.FloatTensor,
-    func: Callable[[torch.Tensor, torch.Tensor]],
+    func: Callable[[torch.Tensor, torch.Tensor], None],
 ):
     n_dims = points.shape[-1]
-    lower_bounds = torch.div(points - min_coords, step_sizes, rounding_mode="floor")
+    lower_bounds = torch.div(
+        points - min_coords, step_sizes, rounding_mode="floor"
+    ).int()
 
     lower_bounds_coords = lower_bounds * step_sizes + min_coords
 
@@ -109,13 +113,13 @@ def _apply_function_for_weights_for_bounds(
         combinations(possible_dim_idx, r) for r in range(len(possible_dim_idx) + 1)
     )
     for idxs_to_shift in powerset_of_dim_idx_shifts:
-        bound_shift = torch.zeros_like(lower_bounds)
-        bound_shift[:, idxs_to_shift] = 1
+        bounds_shift = torch.zeros_like(lower_bounds, dtype=torch.int)
+        bounds_shift[:, idxs_to_shift] = 1
 
         coords_shift = torch.zeros_like(lower_bounds_coords)
-        coords_shift[:, idxs_to_shift] = step_sizes
+        coords_shift[:, idxs_to_shift] = step_sizes[:, idxs_to_shift]
 
-        shifted_bounds = lower_bounds + bound_shift
+        shifted_bounds = lower_bounds + bounds_shift
         shifted_coords = lower_bounds_coords + coords_shift
         weights_for_bounds = distance.pairwise(
             points, shifted_coords

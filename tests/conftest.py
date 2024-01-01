@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch.utils.data import TensorDataset
 
-from al.sampling.base import ActiveInMemoryState
+from al.base import ActiveInMemoryState
 
 
 @pytest.fixture(

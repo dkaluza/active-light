@@ -2,7 +2,8 @@ import pytest
 import torch
 from torch.utils.data import TensorDataset
 
-from al.sampling.base import ActiveInMemoryState, InformativenessProto
+from al.base import ActiveInMemoryState
+from al.sampling.base import InformativenessProto
 from al.sampling.repr.knn import KNearestNeighborRepr
 
 REPR_FUNCTIONS = [KNearestNeighborRepr()]

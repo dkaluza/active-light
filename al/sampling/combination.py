@@ -2,7 +2,8 @@ from typing import Protocol, Sequence
 
 import torch
 
-from al.sampling.base import ActiveState, InformativenessProto
+from al.base import ActiveState
+from al.sampling.base import InformativenessProto
 
 
 class AggregationTactic(Protocol):

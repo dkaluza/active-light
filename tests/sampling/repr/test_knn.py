@@ -1,6 +1,6 @@
 from pytest_mock import MockerFixture
 
-from al.sampling.base import ActiveState
+from al.base import ActiveState
 from al.sampling.repr.knn import k_nearest_neighbor_repr
 
 

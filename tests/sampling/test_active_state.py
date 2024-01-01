@@ -6,9 +6,9 @@ from pytest import FixtureRequest
 from sklearn.dummy import DummyClassifier
 from torch.utils.data import TensorDataset
 
+from al.base import ActiveInMemoryState, ActiveState
 from al.loops.base import ALDataset
 from al.loops.experiments import ScikitWrapper
-from al.sampling.base import ActiveInMemoryState, ActiveState
 from tests.helpers import random_proba
 
 

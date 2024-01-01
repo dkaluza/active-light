@@ -5,14 +5,10 @@ import torch
 from pytest_mock import MockerFixture
 from torch.utils.data import Dataset, Subset, TensorDataset
 
-from al.base import ModelProto
+from al.base import ModelProto, remove_indices_from_dataset
 from al.loops.base import ALDataset, LoopConfig
 from al.loops.perfect_oracle import active_learning_loop
-from al.sampling.base import (
-    ActiveInMemoryState,
-    InformativenessProto,
-    remove_indices_from_dataset,
-)
+from al.sampling.base import InformativenessProto
 
 
 class MockedInfo(InformativenessProto):

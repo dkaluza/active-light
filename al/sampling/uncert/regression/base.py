@@ -4,8 +4,8 @@ import torch
 from torch import FloatTensor, Tensor
 from torch.utils.data import Dataset
 
-from al.base import ModelProto, RegressionModelProto
-from al.sampling.base import ActiveState, InformativenessProto
+from al.base import ActiveState, ModelProto, RegressionModelProto
+from al.sampling.base import InformativenessProto
 
 
 class UncertRegressionBase(InformativenessProto, abc.ABC):

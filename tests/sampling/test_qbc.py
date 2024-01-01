@@ -4,13 +4,13 @@ from torch.utils.data import ConcatDataset, TensorDataset
 from xgboost import XGBRFClassifier
 from xgboost_distribution import XGBDistribution
 
+from al.base import ActiveInMemoryState
 from al.loops.base import ALDatasetWithoutTargets
 from al.loops.experiments import (
     NClassesGuaranteeWrapper,
     XGBDistributionRegressionWrapper,
     XGBWrapper,
 )
-from al.sampling.base import ActiveInMemoryState
 from al.sampling.qbc import Ambiguity, BootstrapJS, BootstrapTactic, RandomSplitTactic
 
 REGRESSION_MODEL = XGBDistributionRegressionWrapper(XGBDistribution(n_estimators=10))

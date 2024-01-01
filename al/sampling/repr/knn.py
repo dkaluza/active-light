@@ -3,32 +3,25 @@ import math
 import faiss
 import faiss.contrib.torch_utils  # import needed to add faiss torch interoperability
 import torch
-from torch.utils.data import DataLoader
 
-from al.base import get_default_torch_device
-from al.sampling.base import ActiveState, InformativenessProto
+from al.base import ActiveState, get_default_torch_device
+from al.loops.base import ALDatasetWithoutTargets
+from al.sampling.base import InformativenessProto
 
 
 class KNearestNeighborRepr(InformativenessProto):
     CACHE_KEY = "KNN_pool_index"
 
-    def __init__(self, k=25, batch_size=32) -> None:
+    def __init__(self, k=25) -> None:
         super().__init__()
         self.k = k
-        self.batch_size = batch_size
         self.index_device = None
 
     def __call__(self, state: ActiveState) -> torch.FloatTensor:
         if self.index_device is None:
             self.index_device = get_default_torch_device()
 
-        pool = []
-        for batch in self._iterate_over_pool(state=state):
-            assert isinstance(batch, list)
-            # assumption batch is always a tuple with features at position 0
-            pool.append(batch[0])
-
-        pool = torch.concat(pool, dim=0).to(self.index_device)
+        pool: torch.FloatTensor = ALDatasetWithoutTargets(state.get_pool()).features
 
         index = self._get_index_from_cache(state)
         if index is None:
@@ -84,11 +77,6 @@ class KNearestNeighborRepr(InformativenessProto):
         )
         # we are removing point itself as it will have always distance 0
         return distances_squared[:, 1:] ** 0.5
-
-    def _iterate_over_pool(self, state: ActiveState):
-        pool = state.get_pool()
-        loader = DataLoader(pool, batch_size=self.batch_size, shuffle=False)
-        yield from loader
 
 
 k_nearest_neighbor_repr = KNearestNeighborRepr()

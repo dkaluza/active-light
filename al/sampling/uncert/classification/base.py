@@ -3,8 +3,8 @@ import abc
 
 import torch
 
-from al.base import CLASSES_DIM
-from al.sampling.base import ActiveState, InformativenessProto
+from al.base import CLASSES_DIM, ActiveState
+from al.sampling.base import InformativenessProto
 
 
 class UncertClassificationBase(InformativenessProto, abc.ABC):

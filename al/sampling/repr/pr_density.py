@@ -1,14 +1,15 @@
+import functools
 import math
+from typing import Callable
 
 import torch
 from torch import FloatTensor
-from torch.utils.data import DataLoader, TensorDataset
-from torchaudio.functional import convolve
+from torch.utils.data import TensorDataset
 
-from al.base import RegressionModelProto
-from al.binning import approximate_point_densities_from_binned_density, linear_binning
+from al.base import ActiveState, RegressionModelProto
 from al.distances import Distance, JensenShannonDistance, L1Distance
-from al.sampling.base import ActiveState, InformativenessProto
+from al.kde import KernelDensityEstimator, NaiveKDE
+from al.sampling.base import InformativenessProto
 from al.sampling.kernels import KernelProto, get_bandwidth_by_dist_quantile
 
 
@@ -17,12 +18,14 @@ class PrDensity(InformativenessProto):
         self,
         kernel: KernelProto,
         distance: Distance = JensenShannonDistance(),
-        batch_size: int = 32,
+        kde_class: Callable[
+            [KernelProto, Distance, float], KernelDensityEstimator
+        ] = functools.partial(NaiveKDE),
     ) -> None:
         super().__init__()
         self.kernel = kernel
         self.distance = distance
-        self.batch_size = batch_size
+        self.kde_class = kde_class
 
     def _call(self, probas: FloatTensor) -> FloatTensor:
         n_samples = probas.shape[0]
@@ -30,35 +33,17 @@ class PrDensity(InformativenessProto):
         # memory at once as it is infeasible for most datasets
         bandwidth = self.get_bandwidth(probas)
 
-        kernel_values = self.get_kernel_values_from_probas(
-            probas=probas, bandwidth=bandwidth
-        ).sum(dim=-1)
-        print(kernel_values.max(), n_samples, bandwidth)
-        densities = kernel_values / bandwidth / n_samples
+        densities = self.get_kde_from_probas(probas=probas, bandwidth=bandwidth)
+
         return densities
 
-    def get_kernel_values_from_probas(
-        self, probas: FloatTensor, bandwidth: float
-    ) -> FloatTensor:
-        kernel_values = []
-        probas_dataset = TensorDataset(probas)
-        loader = DataLoader(
-            dataset=probas_dataset, batch_size=self.batch_size, shuffle=False
+    def get_kde_from_probas(self, probas: FloatTensor, bandwidth: float) -> FloatTensor:
+        model = self.kde_class(
+            kernel=self.kernel, distance=self.distance, bandwidth=bandwidth
         )
-        for probas_batch in loader:
-            # we have created the dataset in a way that batch is always a one element tuple
-            # therefore we can just unpack it
-            (probas_batch,) = probas_batch
-            distances_for_batch = self.distance.cdist(probas_batch, probas)
-            # we are utilizing the fact that for the considered batch we have all of the
-            # distances
-            kernel_values_for_batch = self.kernel(
-                distances=distances_for_batch,
-                bandwidth=bandwidth,
-            )
-
-            kernel_values.append(kernel_values_for_batch)
-        return torch.concat(kernel_values)
+        probas_dataset = TensorDataset(probas)
+        model.fit(probas_dataset)
+        return model.predict(probas_dataset)
 
     def get_bandwidth(self, probas) -> float:
         n_samples = probas.shape[0]
@@ -77,61 +62,6 @@ class PrDensity(InformativenessProto):
     @property
     def __name__(self):
         return "ProbaDensity" + self.kernel.__class__.__name__ + self.distance.__name__
-
-
-class PrDensityApprox(PrDensity):
-    def get_kernel_values_from_probas(
-        self, probas: FloatTensor, bandwidth: float
-    ) -> FloatTensor:
-        binning_results = linear_binning(points=probas, distance=self.distance)
-        grid_weights = binning_results.grid_weights
-        step_sizes = binning_results.step_sizes
-
-        kernel_support_distance = self.kernel.support * bandwidth
-
-        # note: this approximation might be inaccurate for distances like Jensen-Shannon
-        n_grid_sizes_in_kernel_support_distance = torch.floor(
-            kernel_support_distance / step_sizes.squeeze()
-        )
-        n_grid_sizes_to_check = torch.minimum(
-            n_grid_sizes_in_kernel_support_distance, grid_weights.shape
-        )
-
-        grid_coords_in_kernel_sup_distance = torch.cartesian_prod(
-            *[
-                torch.linspace(
-                    -step_size * num_of_steps,
-                    step_size * num_of_steps,
-                    steps=2 * num_of_steps + 1,
-                )  # 0 should be included as a result of steps equal to 2*num_of_steps+1
-                for num_of_steps, step_size in zip(n_grid_sizes_to_check, step_sizes)
-            ]
-        )
-
-        # note: this might cause large errors for Jensen-Shannon distance
-        distances_to_grid_coords = self.distance.pairwise(
-            torch.zeros_like(
-                grid_coords_in_kernel_sup_distance,
-            ),
-            grid_coords_in_kernel_sup_distance,
-        )
-        kernel_values_for_distances = self.kernel(
-            distances=distances_to_grid_coords, bandwidth=bandwidth
-        )
-
-        grid_densities = convolve(
-            grid_weights, kernel_values_for_distances, padding="same"
-        )
-
-        points_densities = approximate_point_densities_from_binned_density(
-            grid_densities=grid_densities,
-            points=probas,
-            distance=self.distance,
-            min_coords=binning_results.min_coords,
-            step_sizes=step_sizes,
-        )
-
-        return points_densities
 
 
 class PrDensityRegr(PrDensity):

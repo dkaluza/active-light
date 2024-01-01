@@ -52,6 +52,17 @@ def create_BAC_metric(config: LoopConfig) -> MetricWrapper:
     return metric
 
 
+def create_BAC_from_predict_metric(config: LoopConfig) -> MetricWrapper:
+    assert config.n_classes
+    metric = MetricWrapper(
+        metric=metrics.MulticlassAccuracy(
+            average="macro", num_classes=config.n_classes
+        ),
+        is_distribution_based=False,
+    )
+    return metric
+
+
 def create_R2_metric(config: LoopConfig) -> MetricWrapper:
     metric = MetricWrapper(
         metric=metrics.R2Score(),
@@ -64,6 +75,7 @@ class LoopMetric(enum.Enum):
     # we are wrapping enum values with partial
     # otherwise it is interpreted as method of the LoopMetric class
     BAC = functools.partial(create_BAC_metric)
+    BAC_from_predict = functools.partial(create_BAC_from_predict_metric)
     R2 = functools.partial(create_R2_metric)
 
 
@@ -131,12 +143,14 @@ class TransparentWrapperMeta(type):
         return self
 
 
+# TODO: Refactor AL dataset outside loops
 class ALDatasetWithoutTargets(Dataset, metaclass=TransparentWrapperMeta):
     _features: torch.FloatTensor | None = None
 
-    def __init__(self, dataset: Dataset, /) -> None:
+    def __init__(self, dataset: Dataset, /, batch_size: int = 1024) -> None:
         super().__init__()
         self.dataset = dataset
+        self.batch_size = batch_size
 
     @property
     def features(self) -> torch.FloatTensor:
@@ -236,7 +250,8 @@ class ALDatasetWithoutTargets(Dataset, metaclass=TransparentWrapperMeta):
 
     def _retrieve_by_iteration(self, index_to_retrieve):
         values = []
-        for batch in self._iterate_over_dataset():
+        loader = DataLoader(self.dataset, shuffle=False, batch_size=self.batch_size)
+        for batch in loader:
             values_batch = batch[index_to_retrieve]
             values.append(values_batch)
 
@@ -248,10 +263,6 @@ class ALDatasetWithoutTargets(Dataset, metaclass=TransparentWrapperMeta):
 
     def __hash__(self) -> int:
         return self.features.__hash__()
-
-    def _iterate_over_dataset(self):
-        loader = DataLoader(self.dataset, shuffle=False)
-        yield from loader
 
     def __getitem__(self, index):
         return self.dataset.__getitem__(index)
@@ -274,6 +285,8 @@ class ALDataset(ALDatasetWithoutTargets):
     _targets: torch.Tensor | None = None
     _targets_dtype: torch.dtype
 
+    _n_classes: int | None = None
+
     def __init__(self, dataset: Dataset, targets_dtype=None) -> None:
         super().__init__(dataset)
         self._targets_dtype = targets_dtype
@@ -288,6 +301,7 @@ class ALDataset(ALDatasetWithoutTargets):
     def _initialize_targets(self):
         if not self._optimized_initialize_targets_for_tensor_types():
             self._initialize_targets_by_iteration()
+        self._n_classes = None
 
     def _optimized_initialize_targets_for_tensor_types(self):
         targets = self._optimized_retrieve_for_tensor_types(
@@ -308,7 +322,9 @@ class ALDataset(ALDatasetWithoutTargets):
 
     @property
     def n_classes(self):
-        return len(self.targets.unique())
+        if self._n_classes is None:
+            self._n_classes = len(self.targets.unique())
+        return self._n_classes
 
     def __eq__(self, __value: object) -> bool:
         if not isinstance(__value, ALDataset):

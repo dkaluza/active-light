@@ -2,8 +2,8 @@ import pytest
 import torch
 from torch.utils.data import TensorDataset
 
+from al.base import remove_indices_from_dataset
 from al.loops.base import ALDatasetWithoutTargets
-from al.sampling.base import remove_indices_from_dataset
 
 TENSOR_DATASET_RANGE_4 = TensorDataset(torch.arange(4, dtype=torch.float))
 

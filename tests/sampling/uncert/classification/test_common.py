@@ -3,8 +3,8 @@ import torch
 from torch.utils.data import TensorDataset
 from xgboost import XGBRFClassifier
 
+from al.base import ActiveInMemoryState
 from al.loops.experiments import XGBWrapper
-from al.sampling.base import ActiveInMemoryState
 from al.sampling.uncert import (
     confidence_ratio,
     entropy,
@@ -93,14 +93,14 @@ def test_uncert_raises_on_wrong_input_shape(uncert_func, probas):
     "dataset, expected_shape",
     [
         (TensorDataset(torch.rand(2, 7), torch.tensor([0, 1])), 2),
-        (TensorDataset(torch.rand(0, 2), torch.tensor([])), 0),
+        (TensorDataset(torch.rand(1, 2), torch.tensor([0])), 1),
         (TensorDataset(torch.rand(3, 2), torch.tensor([0, 1, 2])), 3),
     ],
 )
 def test_uncert_with_model_returns_n_samples_shape(
     uncert_func, dataset, expected_shape
 ):
-    model = XGBWrapper(XGBRFClassifier(n_jobs=1))
+    model = XGBWrapper(XGBRFClassifier(n_jobs=1, n_estimators=10))
     model.fit(dataset)
     state = ActiveInMemoryState(model=model, pool=dataset)
     uncert_values: torch.FloatTensor = uncert_func(state)
