@@ -8,7 +8,7 @@ import numpy as np
 import openml
 import ormsgpack as msgpack
 import pandas as pd
-import sklearn
+import sklearn.preprocessing
 import torch
 import torch.types
 from pydantic import BaseModel
@@ -507,8 +507,15 @@ class NClassesGuaranteeWrapper(ClassificationModelUsingProbaPredictTactic):
         data = ALDataset(data)
 
         predicted_probas = self.model.predict_proba(data)
+        probas = self._wrap_probas(predicted_probas=predicted_probas)
+        return probas
+
+    def _wrap_probas(self, predicted_probas: torch.FloatTensor) -> torch.FloatTensor:
         if self.targets_encoder is not None:
-            probas = torch.zeros((len(data), self.n_classes), dtype=torch.float)
+            probas = torch.zeros(
+                (predicted_probas.shape[0], self.n_classes), dtype=torch.float
+            )
+            # assumption all classes are integers
             trained_on_classes = torch.tensor(self.targets_encoder.classes_)
 
             # in case when only one class occurs in the training set, predict probas still
@@ -524,12 +531,20 @@ class NClassesGuaranteeWrapper(ClassificationModelUsingProbaPredictTactic):
         return probas
 
     def predict(self, data: Dataset) -> torch.FloatTensor:
-        return self.model.predict(data)
+        predicted_classes = self.model.predict(data)
+        if self.targets_encoder is not None:
+            device = predicted_classes.device
+            predicted_classes = self.targets_encoder.inverse_transform(
+                predicted_classes
+            )
+            predicted_classes = torch.from_numpy(predicted_classes).to(device)
+
+        return predicted_classes
 
     def initialize_tactic(self, state: ActiveState):
         # quite ugly workaround as if this model is instance of ClassificationModelUsingProbaPredictTactic
         # depends from the encapsualted model itself
-        # maybe it can be done better via metaclass?
+        # maybe it can be done better via metaclass? # TODO: refactor
         if isinstance(self.model, ClassificationModelUsingProbaPredictTactic):
             self.model.initialize_tactic(state)
 
