@@ -1,10 +1,11 @@
 import torch
 from torch import FloatTensor
 
+from al.distances import entropy
 from al.prior import get_prior_from_model_perspective
 
 from .base import CLASSES_DIM, UncertClassificationBase
-from .classical import entropy
+from .classical import entropy_info
 
 
 class OffCenteredEntropy(UncertClassificationBase):
@@ -33,7 +34,7 @@ class OffCenteredEntropy(UncertClassificationBase):
         relocated_distributions = self.relocate_distribuition(
             probas=probas, maximum_loc=maximum_loc
         )
-        return entropy._call(relocated_distributions)
+        return entropy_info._call(relocated_distributions)
 
     def relocate_distribuition(
         self, probas: FloatTensor, maximum_loc: FloatTensor
@@ -54,6 +55,52 @@ class OffCenteredEntropy(UncertClassificationBase):
         )
 
         return torch.nn.functional.normalize(relocated_values, p=1, dim=CLASSES_DIM)
+
+
+class ClassWeightedEntropy(UncertClassificationBase):
+    def _call(self, probas: FloatTensor) -> FloatTensor:
+        n_samples, n_classes = probas.shape
+        class_priors = get_prior_from_model_perspective(probas=probas, keepdim=True)
+        class_weights = 1 / class_priors
+        print(class_priors)
+
+        entropy_before = torch.where(
+            probas == 0,
+            torch.zeros_like(probas),
+            -torch.log2(probas) * class_weights * probas,
+        ).sum(dim=CLASSES_DIM)
+        probas_before = probas.unsqueeze(dim=-1).expand(
+            ((n_samples, n_classes, n_classes))
+        )
+
+        probas_to_increase = torch.eye(n_classes).unsqueeze(0)
+        # probas_to_decrease = torch.ones((n_classes, n_classes)) - torch.eye(n_classes)
+        # probas_to_decrease = probas_to_decrease * probas_before
+
+        # increased_proba = (1 - chosen_proba_to_increase) / 2
+
+        # probas_to_decrease = (
+        #     probas_to_decrease
+        #     / probas_to_decrease.sum(dim=-1, keepdim=True)
+        #     * increased_proba
+        # )
+        probas_after = (probas_before + probas_to_increase) / 2
+
+        entropy_after = torch.where(
+            probas_after == 0,
+            torch.zeros_like(probas_after),
+            -class_weights * probas_after * torch.log2(probas_after),
+        ).sum(dim=-1)
+
+        expected_entropy_change_per_class = probas * (
+            entropy_before.unsqueeze(dim=-1) - entropy_after
+        )
+        return expected_entropy_change_per_class.sum(dim=CLASSES_DIM)
+        # torch.where(
+        #     probas == 0,
+        #     torch.zeros_like(probas),
+        #     -torch.log2(probas) * probas * class_weights * probas,  # TODO: describe why
+        # )
 
 
 off_centered_entropy = OffCenteredEntropy()

@@ -7,10 +7,10 @@ import pytest
 import torch
 from torch import tensor
 from torch.utils.data import Dataset, TensorDataset
-from xgboost import XGBRFClassifier
+from xgboost import XGBClassifier, XGBRFClassifier
 from xgboost_distribution import XGBDistribution
 
-from al.base import ModelProto
+from al.base import ActiveInMemoryState, ImbalancedModelPriorPredictTactic, ModelProto
 from al.loops import run_experiment
 from al.loops.base import ALDataset, LoopConfig, LoopMetric, LoopResults
 from al.loops.experiments import (
@@ -24,7 +24,7 @@ from al.loops.experiments import (
 )
 from al.loops.perfect_oracle import active_learning_loop
 from al.sampling.qbc import ambiguity
-from al.sampling.uncert import entropy, eveal, least_confidence, margin, variance
+from al.sampling.uncert import entropy_info, eveal, least_confidence, margin, variance
 from al.sampling.uncert.classification.metrics import (
     monotonicity_from_vertex,
     prior_descent_ratio,
@@ -37,11 +37,9 @@ def test_run_experiments_runs_for_selected_number_of_seeds():
     def naive_loop(*args, **kwargs) -> LoopResults:
         return LoopResults(metrics={"TEST": [0.1, 0.2, 0.3]})
 
-    def primitive_info1():
-        ...
+    def primitive_info1(): ...
 
-    def primitive_info2():
-        ...
+    def primitive_info2(): ...
 
     n_repeats = 7
     results = run_experiment(
@@ -58,11 +56,9 @@ def test_run_experiments_uses_same_datasets_for_different_infos():
     mocked_loop = Mock()
     mocked_loop.return_value = LoopResults()
 
-    def primitive_info1():
-        ...
+    def primitive_info1(): ...
 
-    def primitive_info2():
-        ...
+    def primitive_info2(): ...
 
     results = run_experiment(
         mocked_loop,
@@ -92,8 +88,7 @@ def test_run_experiments_uses_different_intial_datasets():
     mocked_loop = Mock()
     mocked_loop.return_value = LoopResults()
 
-    def primitive_info1():
-        ...
+    def primitive_info1(): ...
 
     results = run_experiment(
         mocked_loop,
@@ -119,7 +114,7 @@ def test_al_loop_experiment_generates_scores_for_metrics():
     results = run_experiment(
         active_learning_loop,
         data=TensorDataset(torch.arange(1000).unsqueeze(1), target),
-        infos=[entropy],
+        infos=[entropy_info],
         config=LoopConfig(metrics=[LoopMetric.BAC], n_classes=2),
         budget=100,
         model=DumbModel(),
@@ -127,7 +122,7 @@ def test_al_loop_experiment_generates_scores_for_metrics():
 
     assert len(results) == 1
 
-    entropy_results = results[entropy.__name__]
+    entropy_results = results[entropy_info.name]
 
     bac = entropy_results.metrics[LoopMetric.BAC.name]
     assert bac.shape[0] >= 1
@@ -389,17 +384,17 @@ REGRESSION_DATASET = TensorDataset(torch.rand(20, 5), torch.rand(20))
 @pytest.mark.parametrize(
     "config, model, infos, dataset",
     [
-        (LoopConfig(), CLASSIFICATION_MODEL, [entropy], CLASSIFICATION_DATASET),
+        (LoopConfig(), CLASSIFICATION_MODEL, [entropy_info], CLASSIFICATION_DATASET),
         (
             LoopConfig(metrics=[LoopMetric.BAC]),
             CLASSIFICATION_MODEL,
-            [entropy],
+            [entropy_info],
             CLASSIFICATION_DATASET,
         ),
         (
             LoopConfig(metrics=[LoopMetric.BAC], return_pool_probas=True),
             CLASSIFICATION_MODEL,
-            [entropy],
+            [entropy_info],
             CLASSIFICATION_DATASET,
         ),
         (LoopConfig(), REGRESSION_MODEL, [variance, eveal], REGRESSION_DATASET),
@@ -480,9 +475,26 @@ def test_nclassesguranteewrapper_maintains_probas(dataset, n_classes):
     assert torch.all(probas[:, missing_targets] == 0)
 
 
+def test_NClassesGuaranteeWrapper_predict_with_tactic():
+    n_samples = 20
+    predict_tactic = ImbalancedModelPriorPredictTactic()
+    model = NClassesGuaranteeWrapper(
+        XGBWrapper(XGBClassifier(n_estimators=10), predict_tactic=predict_tactic),
+        n_classes=10,
+    )
+    training_set = TensorDataset(
+        torch.rand(n_samples, 10), torch.randint(0, 5, (n_samples,))
+    )
+    model.fit(training_set)
+    state = ActiveInMemoryState(pool=training_set, model=model)
+    model.initialize_tactic(state=state)
+    preds = model.predict(training_set)
+    assert preds.shape == (n_samples,)
+
+
 @pytest.mark.parametrize(
     "experiment_results",
-    [ExperimentResults(res={entropy.__name__: TRIPLE_EXAMPLARY_CONFIG_RESULTS})],
+    [ExperimentResults(res={entropy_info.name: TRIPLE_EXAMPLARY_CONFIG_RESULTS})],
 )
 @pytest.mark.parametrize(
     "metric_func",
@@ -497,7 +509,7 @@ def test_add_uncert_metric_for_probas_adds_metric(
     experiment_results: ExperimentResults, metric_func: Callable
 ):
     add_uncert_metric_for_probas(
-        experiment_results, uncerts=[entropy], metric=metric_func, name="test"
+        experiment_results, uncerts=[entropy_info], metric=metric_func, name="test"
     )
     for _, val in experiment_results.res.items():
         assert "test" in val.metrics
@@ -507,7 +519,7 @@ def test_add_uncert_metric_for_probas_adds_metric(
 @pytest.mark.parametrize(
     "uncert_func, expected_most_uncert_sample",
     [
-        (entropy, [0.25, 0.25, 0.25, 0.25]),
+        (entropy_info, [0.25, 0.25, 0.25, 0.25]),
         (least_confidence, [0.25, 0.25, 0.25, 0.25]),
         (margin, [0.45, 0.45, 0.1, 0]),
     ],

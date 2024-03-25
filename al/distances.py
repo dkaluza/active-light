@@ -11,8 +11,7 @@ from al.base import CLASSES_DIM
 class Distance(Protocol):
     def pairwise(
         self, input1: torch.FloatTensor, input2: torch.FloatTensor
-    ) -> torch.FloatTensor:
-        ...
+    ) -> torch.FloatTensor: ...
 
     def cdist(
         self, input1: torch.FloatTensor, input2: torch.FloatTensor
@@ -22,7 +21,7 @@ class Distance(Protocol):
         return self.pairwise(input1, input2)
 
     @property
-    def __name__(self):
+    def name(self):
         return self.__class__.__name__
 
 

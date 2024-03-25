@@ -7,16 +7,13 @@ from al.sampling.base import InformativenessProto
 
 
 class AggregationTactic(Protocol):
-    def initialize_result(self, n_values: int) -> torch.FloatTensor:
-        ...
+    def initialize_result(self, n_values: int) -> torch.FloatTensor: ...
 
-    def weight(self, values: torch.FloatTensor, weight: float) -> torch.FloatTensor:
-        ...
+    def weight(self, values: torch.FloatTensor, weight: float) -> torch.FloatTensor: ...
 
     def aggregate(
         self, partial_result: torch.FloatTensor, values: torch.FloatTensor
-    ) -> torch.FloatTensor:
-        ...
+    ) -> torch.FloatTensor: ...
 
 
 class SumAggregation(AggregationTactic):
@@ -77,10 +74,7 @@ class InfoEnsemble(InformativenessProto):
         return results
 
     @property
-    def __name__(self):
+    def name(self):
         return "Ensemble" + "_".join(
-            [
-                f"{info.__name__}{weight}"
-                for info, weight in zip(self.infos, self.weights)
-            ]
+            [f"{info.name}{weight}" for info, weight in zip(self.infos, self.weights)]
         )

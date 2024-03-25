@@ -164,9 +164,12 @@ class ModelProto(Protocol):
     def predict(self, data: Dataset) -> torch.FloatTensor:
         ...
 
+    def predict_logits(self, data: Dataset) -> torch.FloatTensor:
+        raise NotImplementedError()
+
 
 class PredictTactic(Protocol):
-    def intialize_tactic(self, state: ActiveState):
+    def intialize_tactic(self, model: ModelProto, state: ActiveState):
         ...
 
     def make_predictions(self, probas: torch.FloatTensor) -> torch.IntTensor:
@@ -181,9 +184,10 @@ class ArgmaxPredictTactic(PredictTactic):
 class ImbalancedModelPriorPredictTactic(PredictTactic):
     esitmated_class_priors: torch.FloatTensor | None = None
 
-    def intialize_tactic(self, state: ActiveState):
-        super().intialize_tactic(state)
-        probas = state.get_probas()
+    def intialize_tactic(self, model: ModelProto, state: ActiveState):
+        # TODO: refactor?
+        super().intialize_tactic(model=model, state=state)
+        probas = model.predict_proba(state.get_pool())
         self.esitmated_class_priors = probas.mean(dim=0, keepdim=True)
 
     def make_predictions(self, probas: torch.FloatTensor) -> torch.IntTensor:
@@ -204,7 +208,7 @@ class ClassificationModelUsingProbaPredictTactic(ModelProto):
         self.predict_tactic = predict_tactic
 
     def initialize_tactic(self, state: ActiveState):
-        self.predict_tactic.intialize_tactic(state=state)
+        self.predict_tactic.intialize_tactic(model=self, state=state)
 
     def predict(self, data: Dataset) -> torch.FloatTensor:
         probas = self.predict_proba(data=data)

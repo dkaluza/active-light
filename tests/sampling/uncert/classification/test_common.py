@@ -7,7 +7,7 @@ from al.base import ActiveInMemoryState
 from al.loops.experiments import XGBWrapper
 from al.sampling.uncert import (
     confidence_ratio,
-    entropy,
+    entropy_info,
     height_ratio_exponent_evidence,
     height_ratio_large_exponent_evidence,
     height_ratio_log_plus_evidence,
@@ -22,7 +22,7 @@ from al.sampling.uncert.classification.base import UncertClassificationBase
 from tests.helpers import probas_state
 
 CLASSICAL_UNCERT_MEASURES = [
-    entropy,
+    entropy_info,
     least_confidence,
     margin,
     confidence_ratio,

@@ -2,10 +2,15 @@ import pytest
 import torch
 from scipy.spatial.distance import jensenshannon
 
-from al.distances import JensenShannonDistance, L2Distance, jensen_shannon_divergence
+from al.distances import (
+    JensenShannonDistance,
+    L1Distance,
+    L2Distance,
+    jensen_shannon_divergence,
+)
 from tests.helpers import random_proba
 
-DISTANCES = [JensenShannonDistance(), L2Distance()]
+DISTANCES = [JensenShannonDistance(), L2Distance(), L1Distance()]
 
 
 @pytest.mark.parametrize(
@@ -45,6 +50,7 @@ def test_cdist_returns_appropriate_shape(probas1, probas2, distance):
     n_samples2 = probas2.shape[0]
 
     div_values = distance.cdist(probas1, probas2)
+
     assert div_values.shape == (n_samples1, n_samples2)
 
 

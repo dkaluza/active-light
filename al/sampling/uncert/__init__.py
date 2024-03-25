@@ -1,6 +1,6 @@
 from .classification.classical import (
     confidence_ratio,
-    entropy,
+    entropy_info,
     least_confidence,
     margin,
 )

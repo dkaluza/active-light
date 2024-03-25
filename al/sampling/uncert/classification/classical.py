@@ -36,7 +36,7 @@ class LeastConfidence(UncertClassificationBase):
         return 1 - max_proba
 
 
-entropy = Entropy()
+entropy_info = Entropy()
 margin = Margin()
 confidence_ratio = ConfidenceRatio()
 least_confidence = LeastConfidence()

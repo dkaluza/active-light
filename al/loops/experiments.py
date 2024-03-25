@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import enum
+import logging
 from typing import Any, Callable, NamedTuple, Self, Sequence, TypeAlias
 
 import numpy as np
@@ -29,6 +30,8 @@ from al.base import (
 from al.loops.base import ALDataset, FloatTensor, LoopMetricName, LoopResults
 from al.sampling.base import InformativenessProto
 from al.sampling.uncert.classification.base import UncertClassificationBase
+
+logger = logging.getLogger(__name__)
 
 EXPERIMENT_RESULTS_SERIALIZE_EXTENSION = 9
 LOOP_RESULTS_SERIALIZE_EXTENSION = 10
@@ -101,6 +104,10 @@ class ConfigurationResults(BaseModel):
     is not maintained after the iterations. 
     The shape of probas is (n_seeds, n_iterations, n_samples, n_classes).
     """
+    info_times: None | FloatTensor = None
+    """ Computation times measured for informativeness computation on whole pool.
+    The duration is expressed in seconds. The shape of the returned tensor is (n_seeds, n_iterations)
+    """
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, ConfigurationResults):
@@ -143,8 +150,12 @@ class ExperimentResults(BaseModel):
             metrics = ExperimentResults._retrieve_metrics_from_loop_results(
                 loop_results_for_seeds
             )
+
+            info_times = ExperimentResults._retrive_info_times_from_loop_results(
+                loop_results_for_seeds
+            )
             result.res[configuration_name] = ConfigurationResults(
-                pool_probas=pool_probas, metrics=metrics
+                pool_probas=pool_probas, metrics=metrics, info_times=info_times
             )
 
         return result
@@ -197,6 +208,20 @@ class ExperimentResults(BaseModel):
 
         return metrics
 
+    @staticmethod
+    def _retrive_info_times_from_loop_results(
+        loop_results_for_seeds: Sequence[LoopResults],
+    ):
+        if len(loop_results_for_seeds) == 0:
+            return None
+        for loop_result in loop_results_for_seeds:
+            if loop_result.info_times is None:
+                return None
+        times = torch.tensor(
+            [loop_result.info_times for loop_result in loop_results_for_seeds]
+        )
+        return times
+
     def save(self, path: str):
         with open(path, "wb") as file:
             buffer = msgpack.packb(
@@ -242,7 +267,15 @@ def run_experiment(
             initial_train, pool, test = random_split(
                 data, (init_frac, pool_frac, test_frac), generator=generator
             )
-
+            logger.debug(
+                "Experiment details:\n"
+                "Initial training size\t%s"
+                "Pool size\t%s"
+                "Test size\t%s",
+                len(initial_train),
+                len(pool),
+                len(test),
+            )
             for info in infos:
                 loop_result = loop(
                     initial_train=ALDataset(initial_train),
@@ -251,7 +284,7 @@ def run_experiment(
                     info_func=info,
                     **loop_kwargs,
                 )
-                results.setdefault(info.__name__, []).append(loop_result)
+                results.setdefault(info.name, []).append(loop_result)
                 progress_bar.update(1)
 
             experiment_results = ExperimentResults.from_loop_results(results)
@@ -347,7 +380,7 @@ def add_uncert_metric_for_probas(
         Results with metric values saved in `LoopResults.metrics` field.
     """
     metric_name = name if name is not None else metric.__name__
-    uncerts = dict([(uncert.__name__, uncert) for uncert in uncerts])
+    uncerts = dict([(uncert.name, uncert) for uncert in uncerts])
 
     with tqdm(total=len(uncerts), desc="Uncerts:") as progress_bar:
         for config_name, config_results in results.res.items():
@@ -371,7 +404,7 @@ def add_uncert_metric_for_max_uncert_proba(
     name: str | None = None,
 ) -> ExperimentResults:
     metric_name = name if name is not None else metric.__name__
-    uncerts = dict([(uncert.__name__, uncert) for uncert in uncerts])
+    uncerts = dict([(uncert.name, uncert) for uncert in uncerts])
 
     with tqdm(total=len(uncerts), desc="Uncerts:") as progress_bar:
         for config_name, config_results in results.res.items():
@@ -462,6 +495,12 @@ class XGBWrapper(ClassificationModelUsingProbaPredictTactic):
         self.model.fit(features, targets)
 
     def predict_proba(self, data: Dataset) -> torch.FloatTensor:
+        features = self._get_features_in_model_device(data=data)
+        probas = self.model.predict_proba(features)
+
+        return torch.tensor(probas)
+
+    def _get_features_in_model_device(self, data: Dataset):
         data = ALDataset(data)
         features = data.features
 
@@ -471,9 +510,16 @@ class XGBWrapper(ClassificationModelUsingProbaPredictTactic):
             features = cupy.asarray(features)
         else:
             features = features.numpy(force=True)
-        probas = self.model.predict_proba(features)
 
-        return torch.tensor(probas)
+        return features
+
+    def predict_logits(self, data: Dataset) -> FloatTensor:
+        features = self._get_features_in_model_device(data=data)
+        logits = self.model.predict(features, output_margin=True)
+        logits = torch.tensor(logits)
+        if len(logits.shape) == 1:
+            logits = logits.unsqueeze(-1)
+        return logits
 
 
 class NClassesGuaranteeWrapper(ClassificationModelUsingProbaPredictTactic):
@@ -510,10 +556,19 @@ class NClassesGuaranteeWrapper(ClassificationModelUsingProbaPredictTactic):
         probas = self._wrap_probas(predicted_probas=predicted_probas)
         return probas
 
-    def _wrap_probas(self, predicted_probas: torch.FloatTensor) -> torch.FloatTensor:
+    def predict_logits(self, data: Dataset) -> FloatTensor:
+        return self._wrap_probas(
+            self.model.predict_logits(data=data), fill_value=torch.finfo().min
+        )
+
+    def _wrap_probas(
+        self, predicted_probas: torch.FloatTensor, fill_value: float = 0
+    ) -> torch.FloatTensor:
         if self.targets_encoder is not None:
-            probas = torch.zeros(
-                (predicted_probas.shape[0], self.n_classes), dtype=torch.float
+            probas = torch.full(
+                (predicted_probas.shape[0], self.n_classes),
+                dtype=torch.float,
+                fill_value=fill_value,
             )
             # assumption all classes are integers
             trained_on_classes = torch.tensor(self.targets_encoder.classes_)
@@ -531,11 +586,13 @@ class NClassesGuaranteeWrapper(ClassificationModelUsingProbaPredictTactic):
         return probas
 
     def predict(self, data: Dataset) -> torch.FloatTensor:
+        # TODO: test?
         predicted_classes = self.model.predict(data)
         if self.targets_encoder is not None:
             device = predicted_classes.device
+            # TODO: probably does not work if model has seen only single class with index 0
             predicted_classes = self.targets_encoder.inverse_transform(
-                predicted_classes
+                predicted_classes.cpu().numpy()
             )
             predicted_classes = torch.from_numpy(predicted_classes).to(device)
 

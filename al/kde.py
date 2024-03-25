@@ -35,11 +35,9 @@ class KernelDensityEstimator(Protocol):
         self.bandwidth = bandwidth
         self.distance = distance
 
-    def fit(self, train: Dataset):
-        ...
+    def fit(self, train: Dataset): ...
 
-    def predict(self, data: Dataset) -> torch.FloatTensor:
-        ...
+    def predict(self, data: Dataset) -> torch.FloatTensor: ...
 
 
 class NaiveKDE(KernelDensityEstimator):
@@ -74,12 +72,8 @@ class NaiveKDE(KernelDensityEstimator):
                 bandwidth=self.bandwidth,
             )
 
-            kernel_values.append(kernel_values_for_batch)
-        return (
-            torch.concat(kernel_values).sum(-1)
-            / self.bandwidth
-            / self.saved_data.shape[0]
-        )
+            kernel_values.append(kernel_values_for_batch.sum(-1))
+        return torch.concat(kernel_values) / self.bandwidth / self.saved_data.shape[0]
 
 
 class LinearBinningKDE(KernelDensityEstimator):
@@ -209,7 +203,7 @@ class TreeKDE(KernelDensityEstimator):
         return probas
 
 
-class ClusterringKDE(KernelDensityEstimator):
+class ClusteringKDE(KernelDensityEstimator):
     index: faiss.Index | None
     n_index_samples: int | None
     batch_size: int
@@ -254,7 +248,7 @@ class ClusterringKDE(KernelDensityEstimator):
             else self._get_cpu_index(n_classes=n_classes, nlist=nlist)
         )
 
-        index.nprobe = 3
+        index.nprobe = 10
         data = data.to(self.index_device)
 
         index.train(data)
@@ -285,8 +279,14 @@ class ClusterringKDE(KernelDensityEstimator):
         data: torch.FloatTensor = ALDatasetWithoutTargets(data).features
         kernel_values = []
         for data_batch in torch.split(data, self.batch_size):
+            # faiss is using sq dist so we have to adjust threshold
+            bandwidth_in_squared_dist = self.bandwidth**2
+            # we are using 3 bw as for normal distribution it covers
+            # most of the values
             lims, distances, _indices = self.index.range_search(
-                data_batch.to(self.index_device), self.bandwidth * 3
+                data_batch.to(self.index_device),
+                bandwidth_in_squared_dist
+                * 9,  # we wish to retrieve 3 * bw but since it is squared we have to retrive bw**2 * 9
             )
             # TODO: test if appropriate distances are taken
 
@@ -299,12 +299,11 @@ class ClusterringKDE(KernelDensityEstimator):
                 splitted_distances, batch_first=True, padding_value=torch.inf
             )
             # fais returns square of the L2 distance therefore sqrt is needed
-            kernel_values.append(
-                self.kernel(
-                    distances=data_batch_distances_padded**0.5,
-                    bandwidth=self.bandwidth,
-                ).sum(-1)
-            )
+            values_for_batch = self.kernel(
+                distances=data_batch_distances_padded**0.5,
+                bandwidth=self.bandwidth,
+            ).sum(-1)
+            kernel_values.append(values_for_batch)
 
         return (
             torch.concat(kernel_values).to(get_default_torch_device())

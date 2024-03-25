@@ -1,11 +1,11 @@
 import functools
+import time
 
 import torch
-from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
 from al.base import ActiveInMemoryState, ActiveState, ModelProto
-from al.loops.base import ALDataset, LoopConfig, LoopResults
+from al.loops.base import ALDataset, LoopConfig, LoopMetric, LoopResults
 from al.sampling.base import InformativenessProto
 
 
@@ -18,6 +18,7 @@ def active_learning_loop(
     model: ModelProto,
     config: LoopConfig,
 ) -> LoopResults:
+    # TODO: refactor to make it reusable with other loops
     results = LoopResults()
     results.initialize_from_config(config=config)
     used_budget = 0
@@ -39,7 +40,14 @@ def active_learning_loop(
     with tqdm(total=budget, leave=None) as progress_bar:
         while used_budget < budget:
             batch_size = min(config.batch_size, budget - used_budget)
+
+            info_start_time = time.perf_counter()
             info_values = info_func(state=state)
+            info_end_time = time.perf_counter()
+
+            if config.return_info_times:
+                results.info_times.append(info_end_time - info_start_time)
+
             selected_samples_idx = torch.topk(info_values, k=batch_size, dim=0).indices
             selected_samples_idx = selected_samples_idx.reshape(-1)
 
@@ -55,6 +63,7 @@ def active_learning_loop(
             used_budget += batch_size
             progress_bar.update(batch_size)
 
+    print(results)
     return results
 
 
@@ -82,7 +91,6 @@ def add_next_metrics_evaluation(
         metric_input = probas if metric_fun.is_distribution_based else preds
         metric_fun.update(metric_input, test.targets)
         score = metric_fun.compute()
-
         results.metrics.setdefault(metric_name, []).append(score)
 
 

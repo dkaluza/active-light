@@ -92,7 +92,7 @@ class PyramidalEvidence(UncertClassificationBase):
         )
 
     @property
-    def __name__(self):
+    def name(self):
         return self._name
 
 
@@ -118,7 +118,7 @@ class HeightRatioEvidence(UncertClassificationBase):
         )
 
     @property
-    def __name__(self):
+    def name(self):
         return self._name
 
 

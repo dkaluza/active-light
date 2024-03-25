@@ -96,7 +96,8 @@ class LoopResults(BaseModel):
     Value at the index 0 correspond to metric obtained before choosing
     any elements in the loop.
     """
-    pool_probas: Sequence[FloatTensor] | None = None
+    pool_probas: list[FloatTensor] | None = None
+    info_times: list[float] | None = None
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, LoopResults):
@@ -113,6 +114,8 @@ class LoopResults(BaseModel):
                     )
                 ]
             )
+            # info_times are not included in eq check as
+            # there is no way to assure deterministic behavior
         )
 
     def initialize_from_config(self, config: LoopConfig):
@@ -120,11 +123,14 @@ class LoopResults(BaseModel):
             self.metrics = {}
         if config.return_pool_probas:
             self.pool_probas = []
+        if config.return_info_times:
+            self.info_times = []
 
 
 class LoopConfig(BaseModel):
     metrics: Sequence[LoopMetric] = Field(default_factory=list)
     return_pool_probas: bool = False
+    return_info_times: bool = False
     n_classes: int | None = None
     batch_size: int = 1
 

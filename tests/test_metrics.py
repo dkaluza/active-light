@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from al.sampling.uncert import entropy, least_confidence, margin
+from al.sampling.uncert import entropy_info, least_confidence, margin
 from al.sampling.uncert.classification.metrics import (
     _difference_quotient,
     _get_nearest_vertex_position,
@@ -83,7 +83,7 @@ def test_compute_quotient_0_samples_tensors():
 @pytest.mark.parametrize(
     "uncert_func",
     [
-        entropy,
+        entropy_info,
         least_confidence,
         margin,
     ],
