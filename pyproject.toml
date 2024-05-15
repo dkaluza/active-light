@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Comprehensive active machine learning library for knowledge acquisition in unannotated environments."
 authors = ["Daniel Kaluza <daniel.kaluza.dk@gmail.com>"]
 readme = "README.md"
+license = "MIT"
+repository = "https://github.com/dkaluza/active-light"
+keywords = ["active learning", "Knowledge acquisition"]
 packages = [{ include = "al" }]
 
 [tool.poetry.dependencies]
@@ -57,7 +60,7 @@ xgboost-distribution = "^0.2.9"
 
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 
@@ -66,4 +69,4 @@ test = "pytest --cov=al"
 install-torch-gpu = "pip3 install  --upgrade --force-reinstall --no-deps torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
 install-faiss-gpu = "conda install -c conda-forge faiss-gpu"
 install-gpu = ["install-faiss-gpu", "install-torch-gpu"]
-install-all = "poetry install --with dev,plot,loops,experiments"
+install-all = "poetry install --with dev,plot,loops,experiments --extras faiss-cpu"

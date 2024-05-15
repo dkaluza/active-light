@@ -74,16 +74,6 @@ class ClassWeightedEntropy(UncertClassificationBase):
         )
 
         probas_to_increase = torch.eye(n_classes).unsqueeze(0)
-        # probas_to_decrease = torch.ones((n_classes, n_classes)) - torch.eye(n_classes)
-        # probas_to_decrease = probas_to_decrease * probas_before
-
-        # increased_proba = (1 - chosen_proba_to_increase) / 2
-
-        # probas_to_decrease = (
-        #     probas_to_decrease
-        #     / probas_to_decrease.sum(dim=-1, keepdim=True)
-        #     * increased_proba
-        # )
         probas_after = (probas_before + probas_to_increase) / 2
 
         entropy_after = torch.where(
@@ -96,11 +86,6 @@ class ClassWeightedEntropy(UncertClassificationBase):
             entropy_before.unsqueeze(dim=-1) - entropy_after
         )
         return expected_entropy_change_per_class.sum(dim=CLASSES_DIM)
-        # torch.where(
-        #     probas == 0,
-        #     torch.zeros_like(probas),
-        #     -torch.log2(probas) * probas * class_weights * probas,  # TODO: describe why
-        # )
 
 
 off_centered_entropy = OffCenteredEntropy()

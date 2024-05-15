@@ -237,15 +237,15 @@ class ClusteringKDE(KernelDensityEstimator):
 
     def fit(self, train: Dataset):
         data: torch.FloatTensor = ALDatasetWithoutTargets(train).features
-        n_classes = data.shape[1]
+        n_features = data.shape[1]
         n_samples = data.shape[0]
         nlist = math.sqrt(n_samples) if n_samples > 5_000 else math.log2(n_samples)
         nlist = math.ceil(nlist)
 
         index = (
-            self._get_gpu_index(n_classes=n_classes, nlist=nlist)
+            self._get_gpu_index(n_features=n_features, nlist=nlist)
             if self.index_device.type == "cuda"
-            else self._get_cpu_index(n_classes=n_classes, nlist=nlist)
+            else self._get_cpu_index(n_features=n_features, nlist=nlist)
         )
 
         index.nprobe = 10
@@ -257,15 +257,15 @@ class ClusteringKDE(KernelDensityEstimator):
         self.index = index
         self.n_index_samples = n_samples
 
-    def _get_cpu_index(self, n_classes, nlist):
-        quantizer = faiss.IndexFlat(n_classes, self.index_metric)
+    def _get_cpu_index(self, n_features, nlist):
+        quantizer = faiss.IndexFlat(n_features, self.index_metric)
         # IndexIVFFlat unfortunettely does not support most metrics, so we can't pass self.index_metric
-        index = faiss.IndexIVFFlat(quantizer, n_classes, nlist)
+        index = faiss.IndexIVFFlat(quantizer, n_features, nlist)
         return index
 
-    def _get_gpu_index(self, n_classes, nlist):
+    def _get_gpu_index(self, n_features, nlist):
         res = faiss.StandardGpuResources()
-        index = self._get_cpu_index(n_classes=n_classes, nlist=nlist)
+        index = self._get_cpu_index(n_features=n_features, nlist=nlist)
         index = faiss.index_cpu_to_gpu(res, device=self.index_device.index, index=index)
 
         return index
