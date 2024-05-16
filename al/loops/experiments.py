@@ -254,6 +254,8 @@ def run_experiment(
     device = get_default_torch_device()
     generator = torch.Generator(device=device).manual_seed(seed)
 
+    # TODO: add assert about unique info names
+
     if isinstance(test_frac, float):
         test_frac = int(len(data) * test_frac)
     if isinstance(init_frac, float):

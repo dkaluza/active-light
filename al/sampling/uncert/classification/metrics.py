@@ -97,7 +97,7 @@ def _difference_quotient(
     )
 
 
-# gradients cannot be well computed for distributions near simplex border, therefore
+# gradients cannot be computed for distributions near simplex border, therefore
 # some of the values might be not defined
 def torch_gradient(
     func: Callable[[torch.FloatTensor], torch.FloatTensor],

@@ -9,8 +9,9 @@ from torch import FloatTensor
 class KernelProto(Protocol):
     support: float
 
-    def __call__(self, distances: FloatTensor, bandwidth: FloatTensor) -> FloatTensor:
-        ...
+    def __call__(
+        self, distances: FloatTensor, bandwidth: FloatTensor
+    ) -> FloatTensor: ...
 
 
 class UniformKernel(KernelProto):
@@ -29,17 +30,7 @@ class GaussianKernel(KernelProto):
 
 
 class BandwidthTactic(Protocol):
-    def __call__(self, distances: FloatTensor) -> float:
-        ...
-
-
-class QuantileBandwidth(BandwidthTactic):
-    def __init__(self, quantile: float) -> None:
-        super().__init__()
-        self.quantile = quantile
-
-    def __call__(self, distances: FloatTensor) -> float:
-        return get_bandwidth_by_dist_quantile(distances, quantile=self.quantile)
+    def __call__(self, distances: FloatTensor) -> float: ...
 
 
 class ConstantBandwidth(BandwidthTactic):

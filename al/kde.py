@@ -73,6 +73,12 @@ class NaiveKDE(KernelDensityEstimator):
             )
 
             kernel_values.append(kernel_values_for_batch.sum(-1))
+        logger.debug(
+            "NaiveKDE. Bandwidth: %f, n_samples: %d.\nKernel values %s",
+            self.bandwidth,
+            self.saved_data.shape[0],
+            kernel_values,
+        )
         return torch.concat(kernel_values) / self.bandwidth / self.saved_data.shape[0]
 
 
@@ -298,7 +304,7 @@ class ClusteringKDE(KernelDensityEstimator):
             data_batch_distances_padded = pad_sequence(
                 splitted_distances, batch_first=True, padding_value=torch.inf
             )
-            # fais returns square of the L2 distance therefore sqrt is needed
+            # faiss returns square of the L2 distance therefore sqrt is needed
             values_for_batch = self.kernel(
                 distances=data_batch_distances_padded**0.5,
                 bandwidth=self.bandwidth,

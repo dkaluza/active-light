@@ -23,6 +23,7 @@ from al.loops.experiments import (
     add_uncert_metric_for_probas,
 )
 from al.loops.perfect_oracle import active_learning_loop
+from al.sampling.base import InformativenessProto
 from al.sampling.qbc import ambiguity
 from al.sampling.uncert import entropy_info, eveal, least_confidence, margin, variance
 from al.sampling.uncert.classification.metrics import (
@@ -33,13 +34,21 @@ from al.sampling.uncert.classification.metrics import (
 )
 
 
+class PrimitiveInfo1(InformativenessProto): ...
+
+
+primitive_info1 = PrimitiveInfo1()
+
+
+class PrimitiveInfo2(InformativenessProto): ...
+
+
+primitive_info2 = PrimitiveInfo2()
+
+
 def test_run_experiments_runs_for_selected_number_of_seeds():
     def naive_loop(*args, **kwargs) -> LoopResults:
         return LoopResults(metrics={"TEST": [0.1, 0.2, 0.3]})
-
-    def primitive_info1(): ...
-
-    def primitive_info2(): ...
 
     n_repeats = 7
     results = run_experiment(
@@ -55,10 +64,6 @@ def test_run_experiments_runs_for_selected_number_of_seeds():
 def test_run_experiments_uses_same_datasets_for_different_infos():
     mocked_loop = Mock()
     mocked_loop.return_value = LoopResults()
-
-    def primitive_info1(): ...
-
-    def primitive_info2(): ...
 
     results = run_experiment(
         mocked_loop,
@@ -87,8 +92,6 @@ def _retrieve_datasets_for_info(all_calls_args, info):
 def test_run_experiments_uses_different_intial_datasets():
     mocked_loop = Mock()
     mocked_loop.return_value = LoopResults()
-
-    def primitive_info1(): ...
 
     results = run_experiment(
         mocked_loop,
@@ -538,7 +541,7 @@ def test_add_uncert_metric_for_max_uncert_proba_adds_metric_for_appropriate_samp
 ):
     experiment_results: ExperimentResults = ExperimentResults(
         res={
-            uncert_func.__name__: ConfigurationResults(
+            uncert_func.name: ConfigurationResults(
                 metrics={},
                 pool_probas=torch.tensor(
                     [

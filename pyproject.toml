@@ -66,7 +66,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poe.tasks]
 test = "pytest --cov=al"
-install-torch-gpu = "pip3 install  --upgrade --force-reinstall --no-deps torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+install-torch-gpu = "pip3 install  --upgrade --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
 install-faiss-gpu = "conda install -c conda-forge faiss-gpu"
 uninstall-faiss-cpu = "pip3 uninstall faiss-cpu"
 install-gpu = ["uninstall-faiss-cpu", "install-faiss-gpu", "install-torch-gpu"]
