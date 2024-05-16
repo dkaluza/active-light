@@ -13,6 +13,13 @@ Utitlity values from those 2 classes are aggregated with multiplication as descr
 
 The code to reproduce the experiments is available [here](classification_experiments.ipynb).
 
+## Download
+
+Clone the repository and checkout to FALC branch:
+```
+git clone https://github.com/dkaluza/active-light.git --branch FALC
+```
+
 ## Installation
 
 To install all prerequisits please follow the main [README](/README.md) of the repository, to be able to reproduce the experiments please install all of the dependency groups and extras.

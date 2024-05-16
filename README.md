@@ -4,7 +4,7 @@ A library for active learning knowledge aquisition based on pytorch.
 ## Installation
 
 > [!IMPORTANT]
-> GPU installation has been tested only in conda environments, it is adivsed to install in conda environment
+> GPU installation has been tested only in conda environments, it is advised to install in conda environment
 if you would like to use GPU support.
 
 ### 1. First make sure you have poetry installed.
