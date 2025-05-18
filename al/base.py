@@ -158,6 +158,9 @@ class ModelProto(Protocol):
 
     def predict_logits(self, data: Dataset) -> torch.FloatTensor:
         raise NotImplementedError()
+    
+    def get_wrapped_model(self) -> Any:
+        return self
 
 
 class PredictTactic(Protocol):

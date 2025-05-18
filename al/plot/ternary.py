@@ -5,7 +5,7 @@ import mpltern  # pylint: disable=unused-import
 import torch
 
 from al.distributions import uniform_mesh
-from al.sampling.uncert.classification.metrics import numerical_gradient, torch_gradient
+from al.sampling.uncert.classification.metrics import numerical_gradient
 
 
 def plot_uncertainty_function(
@@ -26,6 +26,8 @@ def plot_uncertainty_function(
     levels : int
         Number of levels to include in plot.
     """
+
+    # TODO: unit tests
     distribution = uniform_mesh(3, step=step)
 
     uncert_values = func(distribution)

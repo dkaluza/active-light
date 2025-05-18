@@ -32,7 +32,7 @@ poe install-all
 ### 4. GPU version.
 
 GPU version currently requires in conda installation and CUDA capable GPU.
-Pleace first activate suitable conda environment in which active-light has been installed via:
+Please first activate suitable conda environment in which active-light has been installed via:
 
 ```
 conda activate <env-name>

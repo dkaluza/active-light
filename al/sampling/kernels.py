@@ -72,9 +72,13 @@ class SilvermanTactic(BandwidthTactic):
 
 class ScottTactic(BandwidthTactic):
     """
-    A Scott's rule of the thumb estimation.
+    A Scott's rule of the thumb estimation for normally distributed data.
 
-    For more details see:
+    First proposed for histograms bining in the paper:
+    D. W. SCOTT, "On optimal and data-based histograms",
+    Biometrika 66 (3) (1979) 605-610.
+
+    For more details view:
     https://en.wikipedia.org/wiki/Histogram#Scott's_normal_reference_rule
     """
 

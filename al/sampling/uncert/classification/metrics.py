@@ -115,6 +115,9 @@ def torch_gradient(
     return distribution_with_grad.detach_(), grad
 
 
+gradient_function = numerical_gradient
+
+
 def prior_descent_ratio(func, distribution, prior=None):
     n_classes = distribution.shape[CLASSES_DIM]
     if prior is None:
@@ -123,7 +126,7 @@ def prior_descent_ratio(func, distribution, prior=None):
     # in case of user passed prior is transposed
     prior = prior.reshape(1, n_classes)
 
-    distribution, gradient = torch_gradient(func, distribution=distribution)
+    distribution, gradient = gradient_function(func, distribution=distribution)
 
     return cosine_similarity(gradient, prior - distribution, dim=CLASSES_DIM)
 
@@ -134,7 +137,7 @@ def uncert_maximum_descent_ratio(func, distribution):
     original_shape = distribution.shape
     distribution = distribution.reshape(-1, n_classes)
 
-    distribution, gradient = torch_gradient(func, distribution=distribution)
+    distribution, gradient = gradient_function(func, distribution=distribution)
     uncertainty_max_points_shape = (distribution.shape[0], n_classes - 1, n_classes)
     top_k_classes = torch.arange(n_classes, 1, -1)
     uncertainty_dist_values = 1 / top_k_classes
@@ -200,7 +203,7 @@ def sum_uncert_maximum_descent_ratio(func, distribution):
 
 
 def simplex_vertex_repel_ratio(func, distribution):
-    distribution, gradient = torch_gradient(func, distribution=distribution)
+    distribution, gradient = gradient_function(func, distribution=distribution)
     vertex_position = _get_nearest_vertex_position(distribution)
     return cosine_similarity(-gradient, vertex_position - distribution, dim=CLASSES_DIM)
 

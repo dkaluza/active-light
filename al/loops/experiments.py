@@ -18,15 +18,10 @@ from tqdm.auto import tqdm
 from xgboost import XGBModel
 from xgboost_distribution import XGBDistribution
 
-from al.base import (
-    ActiveInMemoryState,
-    ActiveState,
-    ClassificationModelUsingProbaPredictTactic,
-    ModelProto,
-    PredictTactic,
-    RegressionModelProto,
-    get_default_torch_device,
-)
+from al.base import (ActiveInMemoryState, ActiveState,
+                     ClassificationModelUsingProbaPredictTactic, ModelProto,
+                     PredictTactic, RegressionModelProto,
+                     get_default_torch_device)
 from al.loops.base import ALDataset, FloatTensor, LoopMetricName, LoopResults
 from al.sampling.base import InformativenessProto
 from al.sampling.uncert.classification.base import UncertClassificationBase
@@ -475,6 +470,9 @@ class XGBWrapper(ClassificationModelUsingProbaPredictTactic):
         super().__init__(predict_tactic=predict_tactic)
         self.model = model
 
+    def get_wrapped_model(self):
+        return self.model
+
     def fit(self, train: Dataset):
         super().fit(train=train)
         train = ALDataset(train)
@@ -533,6 +531,9 @@ class NClassesGuaranteeWrapper(ClassificationModelUsingProbaPredictTactic):
         self.model = model
         self.n_classes = n_classes
         self.targets_encoder = None
+
+    def get_wrapped_model(self) -> ModelProto:
+        return self.model.get_wrapped_model()
 
     def fit(self, train: Dataset):
         super().fit(train)
